@@ -1,0 +1,1964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圈叉棋</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", sans-serif;
+            
+        }
+        
+        body {
+            background: #e8e8e8;
+            min-height: 100vh;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            font-size: 15px;
+        }
+        
+        .game-wrapper {
+            width: 100%;
+            max-width: 1400px;
+            display: flex;
+            gap: 20px;
+        }
+        
+        .chessboard-container {
+            flex: 1;
+            height: 641px;
+            border: 2px solid #b8a888;
+            background: #f9f4e8;
+            position: relative;
+            overflow: auto;
+        }
+        
+        .chessboard-container::-webkit-scrollbar { display: none; }
+        
+        #virtualBoardContainer {
+            position: relative;
+            width: calc(80 * 13px);
+            height: calc(80 * 13px);
+        }
+        
+        #chessboard-bg, #chessboard {
+            width: calc(80 * 13px);
+            height: calc(80 * 13px);
+            transform: scale(1);
+            transform-origin: 0 0;
+            transition: transform 0.2s ease;
+            will-change: transform;
+            position: relative;
+        }
+        
+        .panel-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 299px;
+            height: 641px;
+            overflow-y: auto;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE/Edge */
+        }
+        
+        .panel-container::-webkit-scrollbar {
+            display: none; /* Chrome/Safari/Opera */
+        }
+        
+        .panel {
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .panel h3 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #ddd;
+            font-weight: normal;
+        }
+        
+        .info-item {
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .value {
+            font-weight: bold;
+            color: #8b5a2b;
+            font-size: 16px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        
+        .random-map-btn {
+            width: 100%;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ddd;
+            cursor: pointer;
+            border-radius: 3px;
+            margin-top: 10px;
+            opacity: 1;
+        }
+        .random-map-btn:disabled {
+            background: #e8e8e8;
+            color: #999;
+            border-color: #ccc;
+            opacity: 0.5;
+        }
+
+        .obstacle-toggle-group {
+            display: flex; /* 弹性布局，精准控制对齐 */
+            justify-content: flex-end; /* 子元素靠右（关键） */
+            align-items: center; /* 垂直居中 */
+            gap: 8px; /* 元素间距 */
+            margin-top: 8px; /* 与上面按钮的距离 */
+        }
+        
+        .obstacle-toggle-group label {
+            cursor: pointer;
+        }
+        
+        .obstacle-toggle-group input[type="checkbox"]:disabled + label {
+            opacity: 0.7;
+        }
+           
+        button {
+            flex: 1;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ddd;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        
+        button:hover:not(:disabled) { background: #e8e8e8; }
+           
+        .winner {
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            color: #d63031;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+
+        .zoom-control-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #666;
+            z-index: 10;
+            user-select: none;
+        }
+
+        .zoom-btn {
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            transition: background 0.2s;
+        }
+        
+        .zoom-btn:hover {
+            background: #d0d0d0;
+        }
+
+        .zoom-slider-container {
+            width: 100px;
+            height: 6px;
+        }
+        
+        .zoom-slider {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background: #c5c5c5;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .zoom-fill {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            background: #666;
+            border-radius: 3px;
+        }
+        
+        .zoom-thumb {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            background: #fff;
+            border: 1px solid #666;
+            border-radius: 50%;
+            cursor: grab;
+        }
+        
+        .zoom-value {
+            min-width: 40px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            user-select: none;
+        }
+         
+        @media (max-width: 768px) {
+            .game-wrapper { flex-wrap: wrap; }
+            .panel-container { 
+                width: 100%; 
+                height: auto;
+                max-height: 400px;
+            }
+            .chessboard-container {
+                width: 100%;
+                height: 500px;
+            }
+            .main-city-corner, .main-city-core { transform: scale(0.8); }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-wrapper">
+        <div class="chessboard-container" id="scrollArea">
+            <!-- 新增虚拟容器：解决缩放后滚动范围问题 -->
+            <div id="virtualBoardContainer">
+                <canvas id="chessboard-bg" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
+                <canvas id="chessboard" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
+            </div>
+        </div>
+
+        <div class="panel-container">
+            <div class="panel">
+                <h3>在线对战</h3>
+                <div class="btn-group">
+                    <button onclick="joinGame()">加入游戏</button>
+                    <button onclick="createGame()">创建游戏</button>
+                </div>
+
+            </div>
+
+            <div class="panel">
+                <h3>棋局状态</h3>
+                <div class="info-item">
+                    <span>当前操作：</span>
+                    <span class="value" id="current-action">建✕主城</span>
+                </div>
+                <div class="info-item">
+                    <span>棋子数量：</span>
+                    <span>
+                        <span class="value" id="circle-count">◯ 0</span> | 
+                        <span class="value" id="cross-count">✕ 0</span> | 
+                        <span class="value" id="mix-count">⨂ 0</span>
+                    </span>
+                </div>
+                <div class="info-item">
+                    <span>主城：</span>
+                    <span>
+                        <span class="value" id="main-circle-count">◯ 1</span> | 
+                        <span class="value" id="main-cross-count">✕ 1</span>
+                    </span>
+                </div>
+                <div class="info-item">
+                    <span>副城：</span>
+                    <span>
+                        <span class="value" id="sub-circle-count">◯ 0</span> | 
+                        <span class="value" id="sub-cross-count">✕ 0</span>
+                    </span>
+                </div>
+                <div class="btn-group">
+                    <button onclick="resetGame()">重新开局</button>
+                    <button onclick="undoMove()" id="undo-btn" disabled>悔棋</button>
+                    <button onclick="calculateEndgame()">结算胜负</button>
+                </div>
+                <button class="random-map-btn" id="random-map-btn" onclick="createRandomCities()">随机地图</button>
+                <div class="btn-group obstacle-toggle-group">
+                    <input type="checkbox" id="randomCitiesToggle" name="randomCitiesToggle" checked>
+                    <label for="randomCitiesToggle">随机城池</label>
+                    <input type="checkbox" id="obstacleToggle" name="obstacleToggle" checked>
+                    <label for="obstacleToggle">障碍地形</label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>战果统计</h3>
+                <div class="info-item">
+                    <span>◯ 方战果：</span>
+                    <span class="value" id="circle-kill">0</span>
+                </div>
+                <div class="info-item">
+                    <span>✕ 方战果：</span>
+                    <span class="value" id="cross-kill">0</span>
+                </div>
+                <div class="winner" id="winner-text">- 未结算 -</div>
+            </div>
+
+            <div class="panel">
+                <h3>棋局记录</h3>
+                <div class="btn-group">
+                    <button onclick="export_data()">导出棋局</button>
+                    <button onclick="import_data()">载入棋局</button>
+                </div>
+            </div>
+
+            <div class="zoom-control-wrapper">
+                <div class="zoom-btn minus" id="zoom-out-btn" onclick="zoomOut()">-</div>
+                <div class="zoom-slider-container">
+                    <div class="zoom-slider" id="zoom-slider">
+                        <div class="zoom-fill" id="zoom-fill" style="width: 50%"></div>
+                        <div class="zoom-thumb" id="zoom-thumb" style="left: 50%"></div>
+                    </div>
+                </div>
+                <div class="zoom-btn plus" id="zoom-in-btn" onclick="zoomIn()">+</div>
+                <div class="zoom-value" id="zoom-value">100%</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 核心配置
+        const cfg = {
+            size: 80, // 棋盘大小
+            cell: 12, // 棋盘单元格大小
+            zoom: 1, // 缩放比例
+            minZoom: 0.41,
+            maxZoom: 2.0,
+            state: [], // 棋子状态
+            selected: null,      
+            buildPhase: 'x-main', 
+            mainCities: [],      
+            subCities: [],       
+            history: [], // 棋局记录
+        };
+
+        // 棋子状态统计
+        let stats = { circle: 0, cross: 0, mix: 0, circleKill: 0, crossKill: 0 };
+
+        const RANGE = { PLACE: 2, EAT: 1 };
+        const OFFSETS_3x3 = [[-1,-1], [-1,0], [-1,1], [0,-1], [0,0], [0,1], [1,-1], [1,0], [1,1]];
+        const MAIN_CITY_SIZE = 9, MAIN_CITY_OUTER = 7, MAIN_CITY_INNER = 3;
+        const SUB_CITY_SIZE = 7, SUB_CITY_AREA = 5;
+
+        // 缓存DOM
+        const el = {
+            boardBg: document.getElementById('chessboard-bg'),
+            ctxBg: document.getElementById('chessboard-bg').getContext('2d'),
+            board: document.getElementById('chessboard'),
+            ctx: document.getElementById('chessboard').getContext('2d'),
+            scrollArea: document.getElementById('scrollArea'),
+            virtualBoardContainer: document.getElementById('virtualBoardContainer'),
+            currentAction: document.getElementById('current-action'),
+            circleCount: document.getElementById('circle-count'),
+            crossCount: document.getElementById('cross-count'),
+            mixCount: document.getElementById('mix-count'),
+            mainCircleCount: document.getElementById('main-circle-count'),
+            mainCrossCount: document.getElementById('main-cross-count'),
+            subCircleCount: document.getElementById('sub-circle-count'),
+            subCrossCount: document.getElementById('sub-cross-count'),
+            undoBtn: document.getElementById('undo-btn'),
+            randomMapBtn: document.getElementById('random-map-btn'),
+            zoomSlider: document.getElementById('zoom-slider'),
+            zoomFill: document.getElementById('zoom-fill'),
+            zoomThumb: document.getElementById('zoom-thumb'),
+            zoomValue: document.getElementById('zoom-value'),
+            circleKill: document.getElementById('circle-kill'),
+            crossKill: document.getElementById('cross-kill'),
+            winnerText: document.getElementById('winner-text')
+        };
+
+
+        // ========== 获取当前玩家 ==========
+        function getCurrentPlayer() {
+            return cfg.buildPhase.startsWith('x-') ? 'cross' : 'circle';
+        }
+
+
+        // ========== 拖拽滚动 ==========
+        function initDragScroll() {
+            let isDragging = false, startX, startY, scrollLeft, scrollTop;
+            let dragStartX, dragStartY;
+            const DRAG_THRESHOLD = 2; // 拖动阈值（像素）
+            
+            const handleMouseDown = (e) => {
+                isDragging = true;
+                isClick = true; // 默认认为是点击
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                startX = e.pageX - el.scrollArea.getBoundingClientRect().left;
+                startY = e.pageY - el.scrollArea.getBoundingClientRect().top;
+                scrollLeft = el.scrollArea.scrollLeft;
+                scrollTop = el.scrollArea.scrollTop;
+                el.scrollArea.style.cursor = 'grabbing';
+                document.body.style.userSelect = 'none';
+            };
+
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+                
+                // 检查是否超过拖动阈值
+                const distance = Math.sqrt(Math.pow(e.clientX - dragStartX, 2) + Math.pow(e.clientY - dragStartY, 2));
+                if (distance > DRAG_THRESHOLD) {
+                    isClick = false; // 超过阈值，认为是拖动
+                }
+                
+                const x = e.pageX - el.scrollArea.getBoundingClientRect().left;
+                const y = e.pageY - el.scrollArea.getBoundingClientRect().top;
+                // 适配虚拟容器的缩放比例，保证拖动灵敏度一致
+                const dragRatio = 1 / cfg.zoom;
+                el.scrollArea.scrollLeft = scrollLeft - (x - startX) * dragRatio;
+                el.scrollArea.scrollTop = scrollTop - (y - startY) * dragRatio;
+            };
+
+            const handleMouseUp = () => {
+                if (isDragging) {
+                    isDragging = false;
+                    el.scrollArea.style.cursor = 'default';
+                    document.body.style.userSelect = ''; // 恢复默认文本选择， 避免拖动时文本选择
+                }
+            };
+
+            // 绑定事件
+            el.scrollArea.addEventListener('mousedown', handleMouseDown);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            document.addEventListener('mouseleave', handleMouseUp);
+        }
+
+
+        //=========== 棋盘渲染（双层Canvas）============
+        //初始化棋盘
+        function initBoard() {
+            const baseCellSize = cfg.cell;
+            const gapSize = 1;
+            const baseBoardSize = cfg.size * (baseCellSize + gapSize);
+            
+            // 获取设备像素比，支持高分辨率屏幕
+            const dpr = window.devicePixelRatio || 1;
+
+            // 设置两个canvas尺寸（考虑设备像素比）
+            const canvasWidth = baseBoardSize * dpr;
+            const canvasHeight = baseBoardSize * dpr;
+            
+            el.boardBg.width = canvasWidth;
+            el.boardBg.height = canvasHeight;
+            el.board.width = canvasWidth;
+            el.board.height = canvasHeight;
+            
+            // 设置CSS显示尺寸（保持原始大小）
+            el.boardBg.style.width = `${baseBoardSize}px`;
+            el.boardBg.style.height = `${baseBoardSize}px`;
+            el.board.style.width = `${baseBoardSize}px`;
+            el.board.style.height = `${baseBoardSize}px`;
+
+            // 设置canvas上下文缩放
+            el.ctxBg.scale(dpr, dpr);
+            el.ctx.scale(dpr, dpr);
+
+            // 初始化虚拟容器尺寸
+            el.virtualBoardContainer.style.width = `${baseBoardSize * cfg.zoom}px`;
+            el.virtualBoardContainer.style.height = `${baseBoardSize * cfg.zoom}px`;
+
+            // 绘制背景层（棋盘网格、城池、障碍物）
+            drawBoardBg();
+            
+            // 添加点击事件到前景层
+            el.board.addEventListener('click', handleCanvasClick);
+            
+            // 添加鼠标移动事件监听器（悬停高亮）
+            el.board.addEventListener('mousemove', handleCanvasMouseMove);
+        }
+
+        // 绘制背景层（棋盘网格、城池、障碍物）
+        function drawBoardBg() {
+            const ctxBg = el.ctxBg;
+            const baseCellSize = cfg.cell;
+            const gapSize = 1;
+            
+            ctxBg.clearRect(0, 0, el.boardBg.width, el.boardBg.height);
+            
+            // 绘制背景
+            ctxBg.fillStyle = '#f9f4e8';
+            ctxBg.fillRect(0, 0, el.boardBg.width, el.boardBg.height);
+            
+            // 绘制网格线
+            ctxBg.strokeStyle = '#e8d8b8';
+            ctxBg.lineWidth = 1;
+            
+            for (let y = 0; y <= cfg.size; y++) {
+                const yPos = y * (baseCellSize + gapSize);
+                ctxBg.beginPath();
+                ctxBg.moveTo(0, yPos);
+                ctxBg.lineTo(el.boardBg.width, yPos);
+                ctxBg.stroke();
+            }
+            
+            for (let x = 0; x <= cfg.size; x++) {
+                const xPos = x * (baseCellSize + gapSize);
+                ctxBg.beginPath();
+                ctxBg.moveTo(xPos, 0);
+                ctxBg.lineTo(xPos, el.boardBg.height);
+                ctxBg.stroke();
+            }
+            
+            // 绘制城池
+            renderMainCityStylesBg();
+            renderSubCityStylesBg();
+            
+            // 绘制障碍物
+            for (let y = 0; y < cfg.size; y++) {
+                for (let x = 0; x < cfg.size; x++) {
+                    if (cfg.state[y][x].type === 'obstacle') {
+                        const cellX = x * (baseCellSize + gapSize);
+                        const cellY = y * (baseCellSize + gapSize);
+                        drawObstacleBg(ctxBg, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4);
+                    }
+                }
+            }
+        }
+
+        // 绘制前景层（棋子、高亮效果）
+        function drawBoard() {
+            const ctx = el.ctx;
+            
+            ctx.clearRect(0, 0, el.board.width, el.board.height);
+            
+            // 更新所有单元格（棋子和高亮）
+            for (let y = 0; y < cfg.size; y++) {
+                for (let x = 0; x < cfg.size; x++) {
+                    updateCell(x, y);
+                }
+            }
+        }
+
+        // 更新单个单元格
+        function updateCell(x, y) {
+            const ctx = el.ctx;
+            const baseCellSize = cfg.cell;
+            const gapSize = 1;
+            const cellX = x * (baseCellSize + gapSize);
+            const cellY = y * (baseCellSize + gapSize);
+            
+            const cellState = cfg.state[y][x];
+            const hasSelected = !!cfg.selected && cfg.selected.type !== 'mix' && cfg.selected.type !== 'obstacle';
+            const totalChess = stats.circle + stats.cross;
+
+            // 清除单元格区域
+            ctx.clearRect(cellX, cellY, baseCellSize, baseCellSize);
+
+            // 棋子样式（只绘制圆圈、叉、混合棋子，障碍物在背景层绘制）
+            switch(cellState.type) {
+                case 'circle':
+                    drawCircle(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4);
+                    break;
+                case 'cross':
+                    drawCross(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4);
+                    break;
+                case 'mix':
+                    drawMix(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4);
+                    break;
+                case 'obstacle':
+                    // 障碍物在背景层绘制，前景层不需要绘制
+                    break;
+            }
+
+            // 选中状态
+            if (hasSelected && cfg.selected?.x === x && cfg.selected?.y === y) {
+                //ctx.fillStyle = '#80c8ff'; // 与v3的.selected颜色一致, 透明度0.5
+                ctx.fillStyle = 'rgba(128, 200, 255, 0.8)';
+                ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+            }
+
+            // 可操作状态
+            if ((cfg.buildPhase === 'x-game' || cfg.buildPhase === 'o-game' || cfg.buildPhase === 'choose') && hasSelected && cellState.type !== 'mix' && 
+                totalChess > 1 && (x !== cfg.selected.x || y !== cfg.selected.y)) {
+                if (cellState.type === 'empty' && canPlace(x, y) && isInRange(x, y, RANGE.PLACE) && isClearLine(x, y)) {
+                    //ctx.fillStyle = '#bae7ff'; // 与v3的.valid-place颜色一致, 透明度0.5
+                    ctx.fillStyle = 'rgba(186, 231, 255, 0.8)';
+                    ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+                } else if (isEnemy(x, y) && isInRange(x, y, RANGE.EAT) && hasAdvantage()) {
+                    //ctx.fillStyle = '#ffccc7'; // 与v3的.valid-eat颜色一致, 透明度0.5
+                    ctx.fillStyle = 'rgba(255, 204, 199, 0.8)';
+                    ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+                }
+            }
+        }
+
+        // 绘制圆
+        function drawCircle(ctx, x, y, radius) {
+            ctx.fillStyle = '#8b5a2b';
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // 绘制叉
+        function drawCross(ctx, x, y, size) {
+            ctx.strokeStyle = '#8b5a2b';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x - size, y - size);
+            ctx.lineTo(x + size, y + size);
+            ctx.moveTo(x + size, y - size);
+            ctx.lineTo(x - size, y + size);
+            ctx.stroke();
+        }
+
+        // 绘制混合符号
+        function drawMix(ctx, x, y, size) {
+            ctx.fillStyle = '#8b5a2b';
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.8, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.strokeStyle = '#8b5a2b';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x - size * 0.6, y - size * 0.6);
+            ctx.lineTo(x + size * 0.6, y + size * 0.6);
+            ctx.moveTo(x + size * 0.6, y - size * 0.6);
+            ctx.lineTo(x - size * 0.6, y + size * 0.6);
+            ctx.stroke();
+        }
+
+        // 绘制障碍物
+        function drawObstacleBg(ctxBg, x, y, size) {
+            ctxBg.fillStyle = '#8b5a2b88';
+            ctxBg.fillRect(x - size, y - size, size * 2, size * 2);
+        }
+
+        // 主城样式
+        function renderMainCityStylesBg() {
+            const ctxBg = el.ctxBg;
+            const cellSize = cfg.cell;
+            const gapSize = 1;
+            const scale = cellSize + gapSize;
+            
+            ctxBg.strokeStyle = '#8b5a2b';
+            ctxBg.lineWidth = 2;
+            
+            cfg.mainCities.forEach(city => {
+                // 7×7外城四角
+                const midOffset = Math.floor(MAIN_CITY_OUTER / 2);
+                const corners = [
+                    {x: city.x - midOffset, y: city.y - midOffset},
+                    {x: city.x + midOffset + 1, y: city.y - midOffset},
+                    {x: city.x - midOffset, y: city.y + midOffset + 1},
+                    {x: city.x + midOffset + 1, y: city.y + midOffset + 1}
+                ];
+                
+                corners.forEach(corner => {
+                    const cornerX = corner.x * scale;
+                    const cornerY = corner.y * scale;
+                    
+                    ctxBg.beginPath();
+                    // 左上角
+                    if (corner.x < city.x && corner.y < city.y) {
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX + scale, cornerY);
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX, cornerY + scale);
+                    }
+                    // 右上角
+                    else if (corner.x > city.x && corner.y < city.y) {
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX - scale, cornerY);
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX, cornerY + scale);
+                    }
+                    // 左下角
+                    else if (corner.x < city.x && corner.y > city.y) {
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX + scale, cornerY);
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX, cornerY - scale);
+                    }
+                    // 右下角
+                    else if (corner.x > city.x && corner.y > city.y) {
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX - scale, cornerY);
+                        ctxBg.moveTo(cornerX, cornerY);
+                        ctxBg.lineTo(cornerX, cornerY - scale);
+                    }
+                    ctxBg.stroke();
+                });
+
+                // 3×3内城
+                const coreOffset = Math.floor(MAIN_CITY_INNER / 2);
+                const coreX = (city.x - coreOffset) * scale;
+                const coreY = (city.y - coreOffset) * scale;
+                const coreSize = MAIN_CITY_INNER * scale;
+                
+                if (city.owner === 'circle') {
+                    // 圆形主城
+                    ctxBg.beginPath();
+                    ctxBg.arc(city.x * scale + scale/2, city.y * scale + scale/2, coreSize/2, 0, Math.PI * 2);
+                    ctxBg.stroke();
+                } else {
+                    // 方形主城
+                    // ctxBg.beginPath();
+                    // ctxBg.rect(coreX, coreY, coreSize, coreSize);
+                    // ctxBg.stroke();
+                    
+                    // 绘制叉符号
+                    ctxBg.beginPath();
+                    ctxBg.moveTo(coreX, coreY);
+                    ctxBg.lineTo(coreX + coreSize, coreY + coreSize);
+                    ctxBg.moveTo(coreX + coreSize, coreY);
+                    ctxBg.lineTo(coreX, coreY + coreSize);
+                    ctxBg.stroke();
+                }
+            });
+        }
+
+        // 副城样式
+        function renderSubCityStylesBg() {
+            const ctxBg = el.ctxBg;
+            const cellSize = cfg.cell;
+            const gapSize = 1;
+            const scale = cellSize + gapSize;
+            
+            ctxBg.strokeStyle = '#8b5a2b';
+            ctxBg.lineWidth = 2;
+            
+            cfg.subCities.forEach(city => {
+                const areaOffset = Math.floor(SUB_CITY_AREA / 2);
+                const areaX = (city.x - areaOffset) * scale;
+                const areaY = (city.y - areaOffset) * scale;
+                const areaSize = SUB_CITY_AREA * scale;
+                
+                ctxBg.beginPath();
+                ctxBg.rect(areaX, areaY, areaSize, areaSize);
+                ctxBg.stroke();
+            });
+        }
+
+        // 悬停状态管理对象
+        const hoverState = {
+            x: -1,
+            y: -1,
+            lastX: -1,
+            lastY: -1,
+            isUpdating: false,
+            lastUpdateTime: 0,
+            updateInterval: 100,
+            
+            updatePosition(newX, newY) {
+                this.x = newX;
+                this.y = newY;
+            },
+            
+            needsUpdate() {
+                const now = performance.now();
+                return !this.isUpdating && now - this.lastUpdateTime > this.updateInterval;
+            },
+            
+            startUpdate() {
+                this.isUpdating = true;
+                this.lastUpdateTime = performance.now();
+            },
+            
+            finishUpdate() {
+                this.isUpdating = false;
+                this.lastX = this.x;
+                this.lastY = this.y;
+            }
+        };
+        
+        // 拖动和点击区分变量（全局作用域）
+        let isClick = true; // 是否是点击操作（非拖动）
+
+        // 处理canvas点击事件
+        function handleCanvasClick(e) {
+            // 如果是拖动操作，不执行点击逻辑
+            if (!isClick) {
+                isClick = true; // 重置标志，准备下次点击
+                return;
+            }
+            
+            const rect = el.board.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+            
+            const baseCellSize = cfg.cell;
+            const gapSize = 1;
+            
+            // 考虑缩放比例，将点击坐标转换为相对于原始尺寸的坐标
+            const scaledClickX = clickX / cfg.zoom;
+            const scaledClickY = clickY / cfg.zoom;
+            
+            // 计算网格坐标（基于原始尺寸）
+            const x = Math.floor(scaledClickX / (baseCellSize + gapSize));
+            const y = Math.floor(scaledClickY / (baseCellSize + gapSize));
+            
+            if (x >= 0 && x < cfg.size && y >= 0 && y < cfg.size) {
+                handleCellClick(x, y);
+            }
+        }
+
+        // 处理canvas鼠标移动事件（悬停高亮）
+        function handleCanvasMouseMove(e) {
+            const rect = el.board.getBoundingClientRect();
+            const moveX = e.clientX - rect.left;
+            const moveY = e.clientY - rect.top;
+            
+            const baseCellSize = cfg.cell;
+            const gapSize = 1;
+            
+            // 考虑缩放比例，计算网格坐标
+            const scaledMoveX = moveX / cfg.zoom;
+            const scaledMoveY = moveY / cfg.zoom;
+            
+            const x = Math.floor(scaledMoveX / (baseCellSize + gapSize));
+            const y = Math.floor(scaledMoveY / (baseCellSize + gapSize));
+            
+            // 更新悬停位置
+            if (x >= 0 && x < cfg.size && y >= 0 && y < cfg.size) {
+                hoverState.updatePosition(x, y);
+            } else {
+                hoverState.updatePosition(-1, -1);
+            }
+            
+            // 使用节流控制更新频率
+            if (hoverState.needsUpdate()) {
+                hoverState.startUpdate();
+                
+                requestAnimationFrame(() => {
+                    updateHoverHighlight();
+                    hoverState.finishUpdate();
+                });
+            }
+        }
+
+        // 抽帧更新悬停高亮
+        function updateHoverHighlight() {
+            // 如果悬停位置没有变化，不更新
+            if (hoverState.x === hoverState.lastX && hoverState.y === hoverState.lastY) {
+                return;
+            }
+            
+            // 清除上一次悬停位置的高亮
+            if (hoverState.lastX !== -1 && hoverState.lastY !== -1) {
+                updateCell(hoverState.lastX, hoverState.lastY);
+            }
+            
+            // 更新新的悬停位置
+            if (hoverState.x !== -1 && hoverState.y !== -1) {
+                const baseCellSize = cfg.cell;
+                const gapSize = 1;
+                const cellX = hoverState.x * (baseCellSize + gapSize);
+                const cellY = hoverState.y * (baseCellSize + gapSize);
+                
+                // 先清除当前位置
+                el.ctx.clearRect(cellX, cellY, baseCellSize, baseCellSize);
+                
+                // 重新绘制单元格内容
+                updateCell(hoverState.x, hoverState.y);
+                
+                // 绘制悬停高亮
+                el.ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                el.ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+            }
+        }
+
+        // 更新有效区域
+        function updateValidAreas(oldX, oldY) {
+            if (oldX !== undefined && oldY !== undefined) {
+                const startX = Math.max(0, oldX - RANGE.PLACE);
+                const endX = Math.min(cfg.size - 1, oldX + RANGE.PLACE);
+                const startY = Math.max(0, oldY - RANGE.PLACE);
+                const endY = Math.min(cfg.size - 1, oldY + RANGE.PLACE);
+                
+                for (let y = startY; y <= endY; y++) {
+                    for (let x = startX; x <= endX; x++) {
+                        updateCell(x, y);
+                    }
+                }
+            }
+        }
+
+
+        // ========== 城池判定 ==========
+        // 是否在城内
+        function isNoPlaceArea(x, y) {
+            const innerOffset = Math.floor(MAIN_CITY_INNER / 2);
+            return cfg.mainCities.some(city => 
+                x >= city.x - innerOffset && x <= city.x + innerOffset && 
+                y >= city.y - innerOffset && y <= city.y + innerOffset
+            );
+        }
+
+        // 是否在副城内
+        function isSubCity(x, y) {
+            const outerOffset = Math.floor(SUB_CITY_AREA / 2);
+            return cfg.subCities.some(city => 
+                x >= city.x - outerOffset && x <= city.x + outerOffset && 
+                y >= city.y - outerOffset && y <= city.y + outerOffset
+            );
+        }
+
+        // 是否在自己城内
+        function isInOwnPowerArea(x, y) {
+            const currentPlayer = getCurrentPlayer();
+            // 主城判定
+            const checkMainCity = (city) => {
+                if (city.owner !== currentPlayer) return false;
+                const innerOffset = Math.floor(MAIN_CITY_INNER / 2);
+                const outerOffset = Math.floor(MAIN_CITY_OUTER / 2);
+                return !city.attacked 
+                    ? (x >= city.x - outerOffset && x <= city.x + outerOffset && y >= city.y - outerOffset && y <= city.y + outerOffset)
+                    : (x >= city.x - innerOffset && x <= city.x + innerOffset && y >= city.y - innerOffset && y <= city.y + innerOffset);
+            };
+
+            // 副城判定
+            const checkSubCity = (city) => {
+                if (city.occupied !== currentPlayer || city.attacked) return false;
+                const areaOffset = Math.floor(SUB_CITY_AREA / 2);
+                return x >= city.x - areaOffset && x <= city.x + areaOffset && y >= city.y - areaOffset && y <= city.y + areaOffset;
+            };
+
+            return cfg.mainCities.some(checkMainCity) || cfg.subCities.some(checkSubCity);
+        }
+
+        // 是否在敌人城内
+        function isInEnemyPowerArea(x, y) {
+            const currentPlayer = getCurrentPlayer();
+            const checkMainCity = (city) => {
+                if (city.owner === currentPlayer) return false;
+                const innerOffset = Math.floor(MAIN_CITY_INNER / 2);
+                const outerOffset = Math.floor(MAIN_CITY_OUTER / 2);
+                return !city.attacked 
+                    ? (x >= city.x - outerOffset && x <= city.x + outerOffset && y >= city.y - outerOffset && y <= city.y + outerOffset)
+                    : (x >= city.x - innerOffset && x <= city.x + innerOffset && y >= city.y - innerOffset && y <= city.y + innerOffset);
+            };
+
+            const checkSubCity = (city) => {
+                if (!city.occupied || city.occupied === currentPlayer || city.attacked) return false;
+                const areaOffset = Math.floor(SUB_CITY_AREA / 2);
+                return x >= city.x - areaOffset && x <= city.x + areaOffset && y >= city.y - areaOffset && y <= city.y + areaOffset;
+            };
+
+            return cfg.mainCities.some(checkMainCity) || cfg.subCities.some(checkSubCity);
+        }
+
+
+        // ========== 判定函数 ==========
+        // 能否落子
+        function canPlace(x, y) {
+            const totalChess = stats.circle + stats.cross;
+            return !(
+                (totalChess < 2 && isSubCity(x, y)) || 
+                isNoPlaceArea(x, y) || 
+                isInEnemyPowerArea(x, y)
+            );
+        }
+
+        // 沿线是否通畅
+        function isClearLine(x, y) {
+            const dx = x - cfg.selected.x, dy = y - cfg.selected.y;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy));
+            if (steps === 0) return false;
+
+            const stepX = dx / steps, stepY = dy / steps;
+            let cx = cfg.selected.x, cy = cfg.selected.y;
+            
+            for (let i = 1; i < steps; i++) {
+                cx += stepX;
+                cy += stepY;
+                const xMin = Math.floor(cx), xMax = Math.ceil(cx);
+                const yMin = Math.floor(cy), yMax = Math.ceil(cy);
+                
+                for (let rx = xMin; rx <= xMax; rx++) {
+                    for (let ry = yMin; ry <= yMax; ry++) {
+                        if (rx < 0 || rx >= cfg.size || ry < 0 || ry >= cfg.size) return false;
+                        if (isInEnemyPowerArea(rx, ry)) return false;
+                        if (isInOwnPowerArea(rx, ry) && cfg.state[ry][rx].type !== 'empty') return false;
+                        if (!isInOwnPowerArea(rx, ry) && !isInEnemyPowerArea(rx, ry) && cfg.state[ry][rx].type !== 'empty') return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        // 是否有优势
+        function hasAdvantage() {
+            const currentPlayer = getCurrentPlayer();
+            const enemyPlayer = currentPlayer === 'cross' ? 'circle' : 'cross';
+            let self = 0, enemy = 0;
+            for (const [dx, dy] of OFFSETS_3x3) {
+                const nx = cfg.selected.x + dx, ny = cfg.selected.y + dy;
+                if (nx < 0 || nx >= cfg.size || ny < 0 || ny >= cfg.size) continue;
+                
+                const cellState = cfg.state[ny][nx];
+                if (cellState.type === currentPlayer) self++;
+                else if (cellState.type === enemyPlayer) enemy++;
+                if (cellState.type === 'empty' && isInOwnPowerArea(nx, ny)) self++;
+                
+                if (self > 4) return true;
+                if (enemy > 4) return false;
+            }
+            return self > enemy;
+        }
+
+        // 是否在范围内
+        function isInRange(x, y, range) {
+            return Math.abs(x - cfg.selected.x) <= range && Math.abs(y - cfg.selected.y) <= range;
+        }
+
+        // 是否是敌人
+        function isEnemy(x, y) {
+            const currentPlayer = getCurrentPlayer();
+            const type = cfg.state[y][x].type;
+            return (type === 'circle' && currentPlayer === 'cross') || (type === 'cross' && currentPlayer === 'circle');
+        }
+
+        // 副城是否被占
+        function checkSubCityOccupy(x, y) {
+            const areaOffset = Math.floor(SUB_CITY_AREA / 2);
+            const currentPlayer = getCurrentPlayer();
+            let cityChanged = false;
+            
+            cfg.subCities.forEach(city => {
+                if (x >= city.x - areaOffset && x <= city.x + areaOffset && 
+                    y >= city.y - areaOffset && y <= city.y + areaOffset) {
+                    if (city.occupied !== currentPlayer) {
+                        city.occupied = currentPlayer;
+                        cityChanged = true;
+                    }
+                }
+            });
+            
+            // 如果城池状态变化，重新绘制背景层
+            if (cityChanged) {
+                drawBoardBg();
+            }
+        }
+
+        // 检查攻城条件工具函数
+        function checkAttackCondition(x, y, size, attacker) {
+            const offset = Math.floor(size / 2);
+            let count = 0;
+            
+            const checkDirection = (checkX, checkY, dir) => {
+                for (let j = checkX; j <= checkY; j++) {
+                    let nx = 0, ny = 0;
+                switch(dir) {
+                    case 0: nx = j; ny = y - offset; break;
+                    case 1: nx = j; ny = y + offset; break;
+                    case 2: nx = x - offset; ny = j; break;
+                    case 3: nx = x + offset; ny = j; break;
+                }
+                    if (nx < 0 || nx >= cfg.size || ny < 0 || ny >= cfg.size) continue;
+                    if (cfg.state[ny][nx].type === attacker) return true;
+                }
+                return false;
+            };
+
+            if (checkDirection(x - offset + 1, x + offset - 1, 0)) count++; // 上
+            if (checkDirection(x - offset + 1, x + offset - 1, 1)) count++; // 下
+            if (checkDirection(y - offset + 1, y + offset - 1, 2)) count++; // 左
+            if (checkDirection(y - offset + 1, y + offset - 1, 3)) count++; // 右
+            
+            return count >= 4;
+        }
+
+        // 检查攻城
+        function checkCityAttack(x, y) {
+            const currentPlayer = getCurrentPlayer();
+            let cityChanged = false;
+            
+            // 主城
+            cfg.mainCities.forEach(city => {
+                if (city.owner !== currentPlayer && !city.attacked) {
+                    const outerOffset = Math.floor(MAIN_CITY_SIZE / 2);
+                    if (x >= city.x - outerOffset && x <= city.x + outerOffset && 
+                        y >= city.y - outerOffset && y <= city.y + outerOffset) {
+                        const newAttackedState = checkAttackCondition(city.x, city.y, MAIN_CITY_SIZE, currentPlayer);
+                        if (city.attacked !== newAttackedState) {
+                            city.attacked = newAttackedState;
+                            cityChanged = true;
+                        }
+                    }
+                }
+            });
+
+            // 副城
+            cfg.subCities.forEach(city => {
+                if (city.occupied !== currentPlayer && !city.attacked) {
+                    const outerOffset = Math.floor(SUB_CITY_SIZE / 2);
+                    if (x >= city.x - outerOffset && x <= city.x + outerOffset && 
+                        y >= city.y - outerOffset && y <= city.y + outerOffset) {
+                        const newAttackedState = checkAttackCondition(city.x, city.y, SUB_CITY_SIZE, currentPlayer);
+                        if (city.attacked !== newAttackedState) {
+                            city.attacked = newAttackedState;
+                            cityChanged = true;
+                        }
+                    }
+                }
+            });
+            
+            // 如果城池状态变化，重新绘制背景层
+            if (cityChanged) {
+                drawBoardBg();
+            }
+        }
+
+
+        // ========== 游戏交互操作函数 ==========
+        // 处理建城操作
+        function handleBuild(x, y, saveHistoryFlag = true) {
+            el.randomMapBtn.disabled = true;
+            document.getElementById('randomCitiesToggle').disabled = true;
+            document.getElementById('obstacleToggle').disabled = true;
+            const nowPhase = cfg.buildPhase;
+            
+            if (saveHistoryFlag) {
+                saveHistory({phase: cfg.buildPhase, x, y});
+            }
+
+            switch(nowPhase) {
+                case 'x-main': cfg.mainCities.push({x, y, owner: 'cross', attacked: false}); cfg.buildPhase = 'o-main'; break;
+                case 'o-main': cfg.mainCities.push({x, y, owner: 'circle', attacked: false}); cfg.buildPhase = 'x-sub'; break;
+                case 'x-sub': cfg.subCities.push({x, y, owner: 'cross', attacked: false, occupied: null}); cfg.buildPhase = 'o-sub'; break;
+                case 'o-sub': cfg.subCities.push({x, y, owner: 'circle', attacked: false, occupied: null}); cfg.buildPhase = 'x-lay'; break;
+            }
+            drawBoardBg();
+            updateDisplay(saveHistoryFlag);
+        }
+
+        // 处理放置首两颗棋子
+        function handleLay(x, y, saveHistoryFlag = true) {
+            const currentPlayer = getCurrentPlayer();
+            cfg.state[y][x].type = currentPlayer;
+            if (saveHistoryFlag) {
+                saveHistory({phase: cfg.buildPhase, x, y});
+            }
+            
+            // 更新阶段
+            if (cfg.buildPhase === 'x-lay') {
+                if (stats.circle + stats.cross === 1) {
+                    cfg.buildPhase = 'choose';
+                } else {
+                    cfg.buildPhase = 'o-lay';
+                }
+            } else{
+                if (stats.circle + stats.cross === 1) {
+                    cfg.buildPhase = 'choose';
+                } else {
+                    cfg.buildPhase = 'x-lay';
+                }
+            }
+            updateCell(x, y);
+            updateDisplay(saveHistoryFlag);
+        }
+
+        // 处理选择先手
+        function handleChoose(x, y, saveHistoryFlag = true) {
+            const state = cfg.state[y][x];
+            const firstPlayer = state.type;
+            
+            if (saveHistoryFlag) {
+                saveHistory({phase: cfg.buildPhase, player: firstPlayer, x, y});
+            }
+            
+            // 设置游戏阶段
+            cfg.buildPhase = firstPlayer === 'cross' ? 'x-game' : 'o-game';
+            
+            const oldX = cfg.selected?.x, oldY = cfg.selected?.y;
+            cfg.selected = { x:x, y:y, type: state.type };
+            
+            if (oldX !== undefined && oldY !== undefined) updateCell(oldX, oldY);
+            updateValidAreas(x, y);
+            updateDisplay(saveHistoryFlag);
+        }
+
+        // 处理选中棋子
+        function handleSelect(x, y) {
+            const state = cfg.state[y][x];
+            const isCancel = cfg.selected && cfg.selected.x === x && cfg.selected.y === y; 
+            const oldX = cfg.selected?.x, oldY = cfg.selected?.y;
+            
+            if (isCancel) {
+                cfg.selected = null;
+                updateValidAreas(x, y);
+            } else {
+                // 先去除已选棋子高亮
+                cfg.selected = null;
+                updateValidAreas(oldX, oldY);
+                // 再将新选中棋子高亮
+                cfg.selected = { x:x, y:y, type: state.type };
+                updateValidAreas(x, y);
+            }
+        }
+
+        // 处理放置棋子（游戏阶段）
+        function handlePlace(x, y, saveHistoryFlag = true) {
+            if (saveHistoryFlag) {
+                const historyData = {phase: cfg.buildPhase, x, y};
+                // 在x-game和o-game阶段存操作类型
+                if (cfg.buildPhase === 'x-game' || cfg.buildPhase === 'o-game') {
+                    historyData.op = 'place';
+                }
+                saveHistory(historyData);
+            }
+
+            cfg.state[y][x].type = getCurrentPlayer();
+            checkSubCityOccupy(x, y);
+            checkCityAttack(x, y);
+            switchPlayer();
+            if (cfg.selected) {
+                const oldSelectedX = cfg.selected.x;
+                const oldSelectedY = cfg.selected.y;
+                cfg.selected = null;
+                updateValidAreas(oldSelectedX, oldSelectedY);
+            }
+            updateDisplay(saveHistoryFlag);
+        }
+
+        // 处理吃子操作
+        function handleEat(x, y, saveHistoryFlag = true) {
+            if (saveHistoryFlag) {
+                const historyData = {phase: cfg.buildPhase, x, y};
+                // 在x-game和o-game阶段存操作类型
+                if (cfg.buildPhase === 'x-game' || cfg.buildPhase === 'o-game') {
+                    historyData.op = 'eat';
+                }
+                saveHistory(historyData);
+            }
+            cfg.state[y][x].type = 'mix';
+            switchPlayer();
+            if (cfg.selected) {
+                const oldSelectedX = cfg.selected.x;
+                const oldSelectedY = cfg.selected.y;
+                cfg.selected = null;
+                updateValidAreas(oldSelectedX, oldSelectedY);
+            }
+            updateDisplay(saveHistoryFlag);
+        }
+
+        // 点击单元格
+        function handleCellClick(x, y) {
+            const state = cfg.state[y][x];
+            // 建城阶段
+            if (['x-main', 'o-main', 'x-sub', 'o-sub'].includes(cfg.buildPhase)) {
+                handleBuild(x, y);
+                return;
+            }
+            
+            if (state.type === 'mix' || state.type === 'obstacle') return;
+
+            // 首两颗棋子 - x-lay 和 o-lay 阶段
+            if (stats.circle + stats.cross < 2) {
+                if (state.type === 'empty' && canPlace(x, y)) {  
+                    handleLay(x, y);
+                }
+                return;
+            }
+
+            // 选先手
+            if (cfg.buildPhase === 'choose' && state.type !== 'empty') {
+                handleChoose(x, y);
+                return;
+            }
+
+            // 选中己方棋子
+            if (state.type === getCurrentPlayer()) {
+                handleSelect(x, y);
+                return;
+            }
+
+            if (!cfg.selected) return;
+
+            // 落子
+            if (state.type === 'empty' && canPlace(x, y) && isInRange(x, y, RANGE.PLACE) && isClearLine(x, y)) {
+                handlePlace(x, y);
+            }
+            // 吃子
+            else if (isEnemy(x, y) && isInRange(x, y, RANGE.EAT) && hasAdvantage()) {
+                handleEat(x, y);
+            }
+        }
+
+
+        // ============ 状态面板 ==========
+        // 随机地图
+        function createRandomCities() {
+            if (el.randomMapBtn.disabled) return;
+            
+            // 获取选择框状态
+            const isRandomCitiesEnabled = document.getElementById('randomCitiesToggle').checked;
+            const isObstacleEnabled = document.getElementById('obstacleToggle').checked;
+            
+            // 如果两个选项都未选中，不执行任何操作
+            if (!isRandomCitiesEnabled && !isObstacleEnabled) return;
+            
+            el.randomMapBtn.disabled = true;
+            document.getElementById('randomCitiesToggle').disabled = true;
+            document.getElementById('obstacleToggle').disabled = true;
+            
+            cfg.mainCities = [];
+            cfg.subCities = [];
+
+            // 如果选中随机城池，生成城池
+            if (isRandomCitiesEnabled) {
+                // 生成✕主城
+                const main1X = Math.floor(Math.random() * (cfg.size - MAIN_CITY_SIZE)) + Math.floor(MAIN_CITY_SIZE / 2);
+                const main1Y = Math.floor(Math.random() * (cfg.size - MAIN_CITY_SIZE)) + Math.floor(MAIN_CITY_SIZE / 2);
+                cfg.mainCities.push({x: main1X, y: main1Y, owner: 'cross', attacked: false});
+
+                // 生成◯主城
+                let main2X, main2Y;
+                do {
+                    main2X = Math.floor(Math.random() * (cfg.size - MAIN_CITY_SIZE)) + Math.floor(MAIN_CITY_SIZE / 2);
+                    main2Y = Math.floor(Math.random() * (cfg.size - MAIN_CITY_SIZE)) + Math.floor(MAIN_CITY_SIZE / 2);
+                } while (Math.abs(main2X - main1X) < 20 || Math.abs(main2Y - main1Y) < 20);
+                cfg.mainCities.push({x: main2X, y: main2Y, owner: 'circle', attacked: false});
+
+                // 生成✕副城
+                let sub1X, sub1Y;
+                do {
+                    sub1X = Math.floor(Math.random() * (cfg.size - SUB_CITY_SIZE)) + Math.floor(SUB_CITY_SIZE / 2);
+                    sub1Y = Math.floor(Math.random() * (cfg.size - SUB_CITY_SIZE)) + Math.floor(SUB_CITY_SIZE / 2);
+                } while (Math.abs(sub1X - main1X) < 10 || Math.abs(sub1X - main2X) < 10 || Math.abs(sub1Y - main1Y) < 10 || Math.abs(sub1Y - main2Y) < 10);
+                cfg.subCities.push({x: sub1X, y: sub1Y, owner: 'cross', attacked: false, occupied: null});
+
+                // 生成◯副城
+                let sub2X, sub2Y;
+                do {
+                    sub2X = Math.floor(Math.random() * (cfg.size - SUB_CITY_SIZE)) + Math.floor(SUB_CITY_SIZE / 2);
+                    sub2Y = Math.floor(Math.random() * (cfg.size - SUB_CITY_SIZE)) + Math.floor(SUB_CITY_SIZE / 2);
+                } while (Math.abs(sub2X - main1X) < 10 || Math.abs(sub2X - main2X) < 10 || Math.abs(sub2X - sub1X) < 10 || Math.abs(sub2Y - main1Y) < 10 || Math.abs(sub2Y - main2Y) < 10 || Math.abs(sub2Y - sub1Y) < 10);
+                cfg.subCities.push({x: sub2X, y: sub2Y, owner: 'circle', attacked: false, occupied: null});
+            }
+
+            // 如果选中障碍地形，生成障碍物
+            if (isObstacleEnabled) {
+                // 1. 配置参数（保留你的自定义值）
+                const blockCount = 15; // 生成15个障碍物区块
+                const minBlockSize = 1; // 区块最小尺寸（1×1）
+                const maxBlockSize = 6; // 区块最大尺寸（6×6）
+                const randomBreakRate = 0.75; // 区块内随机空缺率（75%）
+
+                // 2. 安全校验：合并“越界”+“禁止区域”判定（核心修复）
+                const isSafeToPlace = (x, y) => {
+                    // 第一步：校验坐标是否在棋盘范围内（彻底避免越界）
+                    if (x < 0 || x >= cfg.size || y < 0 || y >= cfg.size) {
+                        return false;
+                    }
+                    // 第二步：校验是否在城池禁止区域
+                    const mainInnerOffset = Math.floor(MAIN_CITY_SIZE / 2);
+                    const inMainCity = cfg.mainCities.some(city => 
+                        x >= city.x - mainInnerOffset && x <= city.x + mainInnerOffset &&
+                        y >= city.y - mainInnerOffset && y <= city.y + mainInnerOffset
+                    );
+                    const subAreaOffset = Math.floor(SUB_CITY_SIZE / 2);
+                    const inSubCity = cfg.subCities.some(city => 
+                        x >= city.x - subAreaOffset && x <= city.x + subAreaOffset &&
+                        y >= city.y - subAreaOffset && y <= city.y + subAreaOffset
+                    );
+                    return !inMainCity && !inSubCity;
+                };
+
+                // 3. 生成单个连贯区块的函数（修复中心点范围 + 坐标校验）
+                const generateObstacleBlock = () => {
+                    // 核心修复：限制中心点范围，避免偏移后越界（maxBlockSize=9 → half=4，中心点远离边缘4格）
+                    const maxHalfSize = Math.floor(maxBlockSize / 2);
+                    let centerX, centerY;
+                    do {
+                        // 中心点范围：[maxHalfSize, cfg.size - maxHalfSize) → 避免偏移后越界
+                        centerX = Math.floor(Math.random() * (cfg.size - 2 * maxHalfSize)) + maxHalfSize;
+                        centerY = Math.floor(Math.random() * (cfg.size - 2 * maxHalfSize)) + maxHalfSize;
+                    } while (!isSafeToPlace(centerX, centerY)); // 中心点必须在安全区域
+
+                    // 随机区块尺寸（1-9格）
+                    const blockSize = Math.floor(Math.random() * (maxBlockSize - minBlockSize + 1)) + minBlockSize;
+                    const halfSize = Math.floor(blockSize / 2);
+
+                    // 遍历区块内的所有格子（先校验坐标再赋值）
+                    for (let dx = -halfSize; dx <= halfSize; dx++) {
+                        for (let dy = -halfSize; dy <= halfSize; dy++) {
+                            const x = centerX + dx;
+                            const y = centerY + dy;
+
+                            // 修复：先校验坐标安全 + 随机空缺，再设置障碍物
+                            if (!isSafeToPlace(x, y) || Math.random() < randomBreakRate) {
+                                continue;
+                            }
+
+                            // 此时x/y绝对合法，不会越界
+                            cfg.state[y][x].type = 'obstacle';
+                        }
+                    }
+                };
+
+                // 4. 批量生成多个连贯区块
+                for (let i = 0; i < blockCount; i++) {
+                    generateObstacleBlock();
+                }
+            }
+            
+
+            // 收集障碍物位置
+            const obstacles = [];
+            if (isObstacleEnabled) {
+                for (let y = 0; y < cfg.size; y++) {
+                    for (let x = 0; x < cfg.size; x++) {
+                        if (cfg.state[y][x].type === 'obstacle') {
+                            obstacles.push({x, y});
+                        }
+                    }
+                }
+            }
+            
+            // 根据是否选中"随机城池"决定后续阶段
+            if (isRandomCitiesEnabled) {
+                cfg.buildPhase = 'x-lay';
+            } else {
+                cfg.buildPhase = 'x-main';
+                // 如果没有随机城池，清空城池数组，准备手动建城
+                cfg.mainCities = [];
+                cfg.subCities = [];
+            }
+            
+            saveHistory({
+                phase: cfg.buildPhase,
+                mainCities: JSON.parse(JSON.stringify(cfg.mainCities)),
+                subCities: JSON.parse(JSON.stringify(cfg.subCities)),
+                obstacles: obstacles,
+                isRandomCitiesEnabled: isRandomCitiesEnabled,
+                isObstacleEnabled: isObstacleEnabled
+            });
+            // 重新绘制背景层和前景层
+            drawBoardBg();
+            drawBoard();
+            // 更新状态面板
+            updateDisplay();
+        }
+
+        // 切换玩家
+        function switchPlayer() {
+            // 在游戏阶段切换buildPhase
+            if (cfg.buildPhase === 'x-game') {
+                cfg.buildPhase = 'o-game';
+            } else if (cfg.buildPhase === 'o-game') {
+                cfg.buildPhase = 'x-game';
+            }
+            updateDisplay();
+        }
+
+        // 更新状态面板
+        function updateDisplay(saveHistoryFlag = true) {
+            // 操作状态
+            const actionMap = {
+                'x-main': '建✕主城',
+                'o-main': '建◯主城',
+                'x-sub': '建副城',
+                'o-sub': '建副城',
+                'choose': '选先手',
+                'x-lay': '✕方置子',
+                'o-lay': '◯方置子',
+                'x-game': '✕方',
+                'o-game': '◯方'
+            };
+
+            // 棋子计数
+            let circle = 0, cross = 0, mix = 0;
+            for (let y = 0; y < cfg.size; y++) {
+                for (let x = 0; x < cfg.size; x++) {
+                    switch (cfg.state[y][x].type) {
+                        case 'circle': circle++; break;
+                        case 'cross': cross++; break;
+                        case 'mix': mix++; break;
+                    }
+                }
+            }
+            stats = { ...stats, circle, cross, mix };
+
+            // 
+            if (saveHistoryFlag) {
+            
+                el.currentAction.textContent = actionMap[cfg.buildPhase] || '';
+
+                // 城池统计
+                const mainCross = cfg.mainCities.filter(city => city.owner === 'cross' && !city.attacked).length;
+                const mainCircle = cfg.mainCities.filter(city => city.owner === 'circle' && !city.attacked).length;
+                const subCircle = cfg.subCities.filter(city => city.occupied === 'circle').length;
+                const subCross = cfg.subCities.filter(city => city.occupied === 'cross').length;
+                
+                el.circleCount.textContent = `◯ ${circle}`;
+                el.crossCount.textContent = `✕ ${cross}`;
+                el.mixCount.textContent = `⨂ ${mix}`;
+
+                el.mainCircleCount.textContent = `◯ ${mainCircle}`;
+                el.mainCrossCount.textContent = `✕ ${mainCross}`;
+                el.subCircleCount.textContent = `◯ ${subCircle}`;
+                el.subCrossCount.textContent = `✕ ${subCross}`;
+
+                // 战果统计
+                el.circleKill.textContent = stats.circleKill;
+                el.crossKill.textContent = stats.crossKill;
+                el.undoBtn.disabled = cfg.history.length <= 1;
+            }
+        }
+
+        // 保存历史记录
+        function saveHistory(action = { type: "none" }) {
+            cfg.history.push(action);
+        }
+
+        // 重放历史记录
+        function replayHistory(stepCount) {
+            // 重置初始状态
+            cfg.state = Array.from({ length: cfg.size }, () => 
+                Array.from({ length: cfg.size }, () => ({ type: 'empty' }))
+            );
+            cfg.mainCities = [];
+            cfg.subCities = [];
+            cfg.selected = null;
+            cfg.buildPhase = 'x-main';
+            el.randomMapBtn.disabled = false;
+            document.getElementById('randomCitiesToggle').disabled = false;
+            document.getElementById('obstacleToggle').disabled = false;
+
+            // 重放操作 - 从初始状态重新执行每个动作
+            for (let i = 0; i <= stepCount; i++) {
+                const action = cfg.history[i];
+                if (!action) break;
+
+                const safeAction = {
+                    type: action.type || 'none',
+                    x: action.x ?? -1,
+                    y: action.y ?? -1,
+                    chessType: action.chessType || '',
+                    phase: action.phase || '',
+                    prevSelectedX: action.prevSelectedX ?? -1,
+                    prevSelectedY: action.prevSelectedY ?? -1,
+                    mainCities: action.mainCities,
+                    subCities: action.subCities,
+                    obstacles: action.obstacles,
+                    player: action.player,  // 只保留choose动作需要的player信息
+                    isRandomCitiesEnabled: action.isRandomCitiesEnabled,
+                    isObstacleEnabled: action.isObstacleEnabled
+                };
+
+                // 执行动作 - 根据phase字段判断操作类型
+                const phase = safeAction.phase;
+                if (!phase) break;
+                
+                switch (phase) {
+                    case 'x-main':
+                    case 'o-main':
+                    case 'x-sub':
+                    case 'o-sub':
+                        // 建城操作
+                        handleBuild(safeAction.x, safeAction.y, false);
+                        break;
+                    case 'x-lay':
+                    case 'o-lay':
+                        // 置子操作
+                        handleLay(safeAction.x, safeAction.y, false);
+                        break;
+                    case 'choose':
+                        // 选择先手
+                        cfg.buildPhase = safeAction.player === 'cross' ? 'x-game' : 'o-game';
+                        break;
+                    case 'x-game':
+                    case 'o-game':
+                        // 游戏阶段，根据op字段判断操作类型
+                        if (safeAction.op === 'place') {
+                            handlePlace(safeAction.x, safeAction.y, false);
+                        } else if (safeAction.op === 'eat') {
+                            handleEat(safeAction.x, safeAction.y, false);
+                        }
+                        break;
+                    case 'random':
+                        // 随机地图操作
+                        cfg.mainCities = safeAction.mainCities ? JSON.parse(JSON.stringify(safeAction.mainCities)) : [];
+                        cfg.subCities = safeAction.subCities ? JSON.parse(JSON.stringify(safeAction.subCities)) : [];
+                        
+                        // 恢复障碍物
+                        if (safeAction.obstacles && safeAction.obstacles.length > 0) {
+                            safeAction.obstacles.forEach(obstacle => {
+                                if (obstacle.x >= 0 && obstacle.x < cfg.size && obstacle.y >= 0 && obstacle.y < cfg.size) {
+                                    cfg.state[obstacle.y][obstacle.x].type = 'obstacle';
+                                }
+                            });
+                        }
+                        
+                        // 根据isRandomCitiesEnabled决定后续阶段
+                        if (safeAction.isRandomCitiesEnabled) {
+                            cfg.buildPhase = 'x-lay';
+                        } else {
+                            cfg.buildPhase = 'x-main';
+                        }
+                        el.randomMapBtn.disabled = true;
+                        document.getElementById('randomCitiesToggle').disabled = true;
+                        document.getElementById('obstacleToggle').disabled = true;
+                        break;
+                }
+            }
+        }
+
+        // 悔棋
+        function undoMove() {
+            if (cfg.history.length <= 1) return;
+
+            cfg.history.pop();
+            const targetStep = cfg.history.length - 1;
+
+            replayHistory(targetStep);
+            
+            drawBoard();
+            drawBoardBg();
+            
+            updateDisplay(true); // 需要显示出来
+        }
+
+        // 重新开局
+        function resetGame() {
+            initGame();
+            el.scrollArea.scrollLeft = el.scrollArea.scrollTop = 0;
+            el.winnerText.textContent = '- 未结算 -';
+        }
+
+        // 结算胜负
+        function calculateEndgame() {
+            let circleKill = 0, crossKill = 0;
+            for (let y = 0; y < cfg.size; y++) {
+                for (let x = 0; x < cfg.size; x++) {
+                    if (cfg.state[y][x].type !== 'mix') continue;
+                    
+                    let circle = 0, cross = 0;
+                    for (const [dx, dy] of OFFSETS_3x3) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= cfg.size || ny < 0 || ny >= cfg.size) continue;
+                        const type = cfg.state[ny][nx].type;
+                        if (type === 'circle') circle++;
+                        else if (type === 'cross') cross++;
+                    }
+                    
+                    if (circle > cross) circleKill++;
+                    else if (cross > circle) crossKill++;
+                }
+            }
+            stats = { ...stats, circleKill, crossKill };
+            el.circleKill.textContent = circleKill;
+            el.crossKill.textContent = crossKill;
+            el.winnerText.textContent = circleKill > crossKill 
+                ? `◯ 方胜利(${circleKill}:${crossKill})` 
+                : crossKill > circleKill 
+                    ? `✕ 方胜利(${crossKill}:${circleKill})` 
+                    : `平局(${circleKill}:${crossKill})`;
+        }
+
+
+        // ========== 缩放控制 ==========
+        function initZoom() {
+            setZoom(1);
+            setupZoomSlider();
+        }
+
+        function updateZoomSlider() {
+            const percent = ((cfg.zoom - cfg.minZoom) / (cfg.maxZoom - cfg.minZoom)) * 100;
+            el.zoomFill.style.width = `${percent}%`;
+            el.zoomThumb.style.left = `${percent}%`;
+            el.zoomValue.textContent = `${Math.round(cfg.zoom * 100)}%`;
+        }
+
+        function setupZoomSlider() {
+            let isDragging = false;
+            
+            const getZoomFromPos = (clientX) => {
+                const rect = el.zoomSlider.getBoundingClientRect();
+                let percent = (clientX - rect.left) / rect.width;
+                percent = Math.max(0, Math.min(1, percent));
+                return cfg.minZoom + (cfg.maxZoom - cfg.minZoom) * percent;
+            };
+            
+            const handleThumbDown = (e) => {
+                isDragging = true;
+                el.zoomThumb.style.cursor = 'grabbing';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            };
+            
+            const handleSliderClick = (e) => {
+                if (e.target === el.zoomThumb) return;
+                const newZoom = getZoomFromPos(e.clientX);
+                setZoom(newZoom);
+            };
+            
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+                const newZoom = getZoomFromPos(e.clientX);
+                setZoom(newZoom);
+            };
+            
+            const handleMouseUp = () => {
+                if (isDragging) {
+                    isDragging = false;
+                    el.zoomThumb.style.cursor = 'grab';
+                    document.body.style.userSelect = '';
+                    // 拖动结束后恢复Canvas过渡效果
+                    el.boardBg.style.transition = 'transform 0.2s ease';
+                    el.board.style.transition = 'transform 0.2s ease';
+                }
+            };
+
+            // 绑定事件
+            el.zoomThumb.addEventListener('mousedown', handleThumbDown);
+            el.zoomSlider.addEventListener('mousedown', handleSliderClick);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            document.addEventListener('touchend', handleMouseUp);
+            
+            // 移动端适配
+            el.zoomThumb.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                // 触摸拖动时禁用Canvas过渡效果，避免抖动
+                el.boardBg.style.transition = 'none';
+                el.board.style.transition = 'none';
+                e.preventDefault();
+            });
+            
+            document.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                const touch = e.touches[0];
+                const newZoom = getZoomFromPos(touch.clientX);
+                setZoom(newZoom);
+            });
+        }
+
+        function setZoom(level) {
+            level = parseFloat(level.toFixed(2));
+            
+            if (level < cfg.minZoom) level = cfg.minZoom;
+            else if (level > cfg.maxZoom) level = cfg.maxZoom;
+            
+            if (Math.abs(level - cfg.zoom) < 0.01) return;
+            
+            const oldZoom = cfg.zoom;
+            const oldScrollLeft = el.scrollArea.scrollLeft;
+            const oldScrollTop = el.scrollArea.scrollTop;
+            
+            cfg.zoom = level;
+            
+            // 保留GPU加速的scale缩放（同时缩放背景层和前景层）
+            el.boardBg.style.transform = `scale(${cfg.zoom})`;
+            el.board.style.transform = `scale(${cfg.zoom})`;
+            
+            // 同步虚拟容器尺寸（解决滚动范围问题）
+            const baseBoardSize = cfg.size * (cfg.cell + 1);
+            el.virtualBoardContainer.style.width = `${baseBoardSize * cfg.zoom}px`;
+            el.virtualBoardContainer.style.height = `${baseBoardSize * cfg.zoom}px`;
+            
+            updateZoomSlider();
+            
+            // 精准调整滚动位置
+            requestAnimationFrame(() => {
+                const scaleRatio = cfg.zoom / oldZoom;
+                el.scrollArea.scrollLeft = oldScrollLeft * scaleRatio;
+                el.scrollArea.scrollTop = oldScrollTop * scaleRatio;
+            });
+        }
+
+        function zoomIn() {
+            setZoom(cfg.zoom + 0.1);
+        }
+
+        function zoomOut() {
+            setZoom(cfg.zoom - 0.1);
+        }
+
+        //============== 导入/导出游戏数据 =============
+        function export_data() {
+            const exportData = {
+                version: "4",
+                timestamp: new Date().toISOString(),
+                cfg: {
+                    size: cfg.size,
+                    cell: cfg.cell,
+                    history: cfg.history,
+                    randomBtnDisabled: el.randomMapBtn.disabled,
+                    randomCitiesEnabled: document.getElementById('randomCitiesToggle').checked,
+                    randomObstacleEnabled: document.getElementById('obstacleToggle').checked
+                },
+                stats: stats
+            };
+
+            const jsonStr = JSON.stringify(exportData);
+            const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+
+            const a = document.createElement("a");
+            const fileName = `圈叉棋_棋局${new Date().getTime()}.json`;
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(a.href);
+
+            alert(`棋局已导出：${fileName}`);
+        }
+
+        function import_data() {
+            const fileInput = document.createElement("input");
+            fileInput.type = "file";
+            fileInput.accept = ".json";
+
+            fileInput.onchange = function (e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    try {
+                        const importData = JSON.parse(event.target.result);
+                        if (!validateImportData(importData)) {
+                            alert("导入失败：文件格式错误或数据不完整！");
+                            return;
+                        }
+
+                        restoreGameState(importData);
+
+                        
+                        initBoard();
+                        drawBoardBg();
+                        drawBoard();
+
+                        updateZoomSlider();
+                        
+                        updateDisplay();
+                        alert("棋局导入成功！");
+                    } catch (error) {
+                        console.error("导入解析失败：", error);
+                        alert(`导入失败：${error.message}`);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            fileInput.click();
+        }
+
+        function validateImportData(data) {
+            if (!data || !data.cfg || !data.stats) return false;
+            const requiredCfgFields = ["size", "cell", "history"];
+            return requiredCfgFields.every(field => data.cfg.hasOwnProperty(field));
+        }
+
+        function restoreGameState(data) {
+            cfg.size = data.cfg.size;
+            cfg.cell = data.cfg.cell || 12;
+            cfg.history = data.cfg.history || [];
+
+            stats = data.stats || { circle: 0, cross: 0, mix: 0, circleKill: 0, crossKill: 0 };
+
+            // 使用历史记录回放恢复游戏状态
+            replayHistory(cfg.history.length - 1);
+            
+            cfg.zoom = 1;
+            el.randomMapBtn.disabled = data.cfg.randomBtnDisabled;
+            document.getElementById('randomCitiesToggle').disabled = data.cfg.randomBtnDisabled;
+            document.getElementById('obstacleToggle').disabled = data.cfg.randomBtnDisabled;
+            
+            // 恢复选择框状态
+            if (data.cfg.randomCitiesEnabled !== undefined) {
+                document.getElementById('randomCitiesToggle').checked = data.cfg.randomCitiesEnabled;
+            }
+            if (data.cfg.randomObstacleEnabled !== undefined) {
+                document.getElementById('obstacleToggle').checked = data.cfg.randomObstacleEnabled;
+            }
+        }
+
+        //============== 初始化游戏 ===============
+        function initGame() {
+            // 初始化核心状态cfg
+            cfg.state = Array.from({ length: cfg.size }, () => 
+                Array.from({ length: cfg.size }, () => ({ type: 'empty' }))
+            );
+            cfg.history = [];
+            cfg.selected = null;
+            cfg.buildPhase = 'x-main';
+            cfg.mainCities = [];
+            cfg.subCities = [];
+            cfg.randomBtnDisabled = false;
+            stats = { circle: 0, cross: 0, mix: 0, circleKill: 0, crossKill: 0 };
+
+            // 重置UI
+            el.randomMapBtn.disabled = false;
+            document.getElementById('randomCitiesToggle').disabled = false;
+            document.getElementById('obstacleToggle').disabled = false;
+
+            // 初始化核心功能
+            saveHistory({type: "none"}); 
+            
+            initZoom();
+            initBoard();
+            initDragScroll();
+            
+            updateDisplay();
+
+            // 滚动事件节流
+            const throttledScroll = (() => {
+                let timer = null;
+                return () => {
+                    if (!timer) {
+                        timer = setTimeout(() => {
+                            timer = null;
+                        }, 15);
+                    }
+                };
+            })();
+            el.scrollArea.addEventListener('scroll', throttledScroll);
+
+            // 窗口resize适配
+            const handleResize = (() => {
+                let timer = null;
+                return () => {
+                    if (!timer) {
+                        timer = setTimeout(() => {
+                            initBoard();
+                            drawBoardBg();
+                            drawBoard();
+                            timer = null;
+                        }, 50);
+                    }
+                };
+            })();
+            window.addEventListener('resize', handleResize);
+        }
+
+        // 启动游戏
+        window.onload = initGame;
+    </script>
+
+</body>
+</html>

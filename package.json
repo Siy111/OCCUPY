@@ -1,0 +1,14 @@
+{
+  "name": "chess-game",
+  "version": "1.0.0",
+  "description": "圈叉棋局域网对战游戏",
+  "main": "websocket-server.js",
+  "scripts": {
+    "start": "node websocket-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "author": "",
+  "license": "MIT"
+}

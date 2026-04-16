@@ -1,0 +1,50 @@
+// 状态栏中显示的状态
+x-main
+o-main
+x-sub
+o-sub
+x-lay
+o-lay
+choose
+x-game
+o-game
+
+// saveHistory中的状态
+opt: mainX, x, y
+opt: mainO, x, y
+opt: subX, x, y
+opt: subO, x, y
+opt: random, mainCities[], subCities[], obstacles[], isRandomCitiesEnabled, isObstacleEnabled
+opt: layX, x, y
+opt: layO, x, y
+opt: choose, player: firstPlayer, x, y
+opt: x-place, x, y
+opt: o-place, x, y
+opt: x-eat, x, y
+opt: o-eat, x, y
+
+// sendAction中的状态
+opt: mainX, x, y
+opt: mainO, x, y
+opt: subX, x, y
+opt: subO, x, y
+opt: random, mainCities[], subCities[], obstacles[], isRandomCitiesEnabled, isObstacleEnabled
+opt: layX, x, y
+opt: layO, x, y
+opt: choose, player: firstPlayer, x, y
+opt: x-place, x, y
+opt: o-place, x, y
+opt: x-eat, x, y
+opt: o-eat, x, y
+
+opt: select, x, y
+
+opt: undo
+opt: undo-reply, reply: boolean
+opt: restart
+opt: undo-reply, reply: boolean
+opt: calculate
+opt: calculate-reply, reply: boolean
+opt: export
+opt: export-reply, reply: boolean
+// opt: import, file 先不做
