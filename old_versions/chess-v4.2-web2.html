@@ -382,8 +382,8 @@
                     <h3>棋局记录</h3>
                         <div id="history-list"></div>
                         <div class="btn-group">
-                        <button onclick="export_data()">导出棋局</button>
-                        <button onclick="import_data()">载入棋局</button>
+                        <button onclick="exportData()">导出棋局</button>
+                        <button onclick="importData()">载入棋局</button>
                     </div>
                 </div>
             </div>
@@ -689,7 +689,7 @@
                 // valid place
                 if (cellState.type === 'empty' && canPlace(x, y) 
                     && isInRange(x, y, cfg.selected.x, cfg.selected.y, RANGE.PLACE) 
-                    && isClearLine(x, y)) {
+                    && isPathClear(x, y)) {
                     ctx.fillStyle = 'rgba(186, 231, 255, 0.8)';
                     ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
                 }
@@ -911,7 +911,7 @@
             const y = Math.floor(scaledClickY / (baseCellSize + gapSize));
             
             if (x >= 0 && x < gameConfig.size && y >= 0 && y < gameConfig.size) {
-                handleCellClick(x, y);
+                processCellClick(x, y);
             }
         }
 
@@ -1188,7 +1188,7 @@
         }
 
         // 沿线是否通畅
-        function isClearLine(x, y) {
+        function isPathClear(x, y) {
             const dx = x - cfg.selected.x, dy = y - cfg.selected.y;
             const steps = Math.max(Math.abs(dx), Math.abs(dy));
             if (steps === 0) return false;
@@ -1368,7 +1368,7 @@
 
         // ========== 游戏交互操作函数 ==========
         // 处理建城操作
-        function handleBuild(x, y, saveHistoryFlag = true) {
+        function processBuild(x, y, saveHistoryFlag = true) {
             el.randomMapBtn.disabled = true;
             el.randomCitiesToggle.disabled = true;
             el.resourceToggle.disabled = true;
@@ -1400,7 +1400,7 @@
         }
 
         // 处理放置首两颗棋子
-        function handleLay(x, y, saveHistoryFlag = true) {
+        function processLay(x, y, saveHistoryFlag = true) {
             const currentPlayer = getCurrentPlayer();
             cfg.state[y][x].type = currentPlayer;
             if (saveHistoryFlag) {
@@ -1425,7 +1425,7 @@
         }
 
         // 处理选择先手
-        function handleChoose(x, y, saveHistoryFlag = true) {
+        function processChoose(x, y, saveHistoryFlag = true) {
             const state = cfg.state[y][x];
             const firstPlayer = state.type;
             
@@ -1447,7 +1447,7 @@
         }
 
         // 处理选中棋子
-        function handleSelect(x, y) {
+        function processSelect(x, y) {
             const state = cfg.state[y][x];
             const isCancel = cfg.selected && cfg.selected.x === x && cfg.selected.y === y; 
             const oldX = cfg.selected?.x, oldY = cfg.selected?.y;
@@ -1466,7 +1466,7 @@
         }
 
         // 处理放置棋子（游戏阶段）
-        function handlePlace(x, y, saveHistoryFlag = true) {
+        function processPlace(x, y, saveHistoryFlag = true) {
             if (saveHistoryFlag) {
                 const opt = cfg.buildPhase === 'x-game' ? 'x-place' : 'o-place';
                 saveHistory({
@@ -1495,7 +1495,7 @@
         }
 
         // 处理吃子操作
-        function handleEat(x, y, saveHistoryFlag = true) {
+        function processEat(x, y, saveHistoryFlag = true) {
             if (saveHistoryFlag) {
                 const opt = cfg.buildPhase === 'x-game' ? 'x-eat' : 'o-eat';
                 saveHistory({
@@ -1521,7 +1521,7 @@
         }
 
         // 点击单元格
-        function handleCellClick(x, y) {
+        function processCellClick(x, y) {
             // 网络对战时，检查是否轮到自己的回合
             if (isNetworkGame && !isMyTurn) {
                 return;
@@ -1533,7 +1533,7 @@
             if (state.type === 'empty') {
                 // 建城阶段
                 if (['x-main', 'o-main', 'x-sub', 'o-sub'].includes(cfg.buildPhase)) {
-                    handleBuild(x, y);
+                    processBuild(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         const lastAction = cfg.history[cfg.history.length - 1];
@@ -1545,7 +1545,7 @@
 
                 // 首两颗棋子
                 else if (['x-lay', 'o-lay'].includes(cfg.buildPhase) && canPlace(x, y)) {
-                    handleLay(x, y);
+                    processLay(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         const lastAction = cfg.history[cfg.history.length - 1];
@@ -1558,8 +1558,8 @@
                 // 落子
                 else if (cfg.selected && canPlace(x, y)
                     && isInRange(x, y, cfg.selected.x, cfg.selected.y, RANGE.PLACE) 
-                    && isClearLine(x, y)) {
-                    handlePlace(x, y);
+                    && isPathClear(x, y)) {
+                    processPlace(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         const lastAction = cfg.history[cfg.history.length - 1];
@@ -1571,7 +1571,7 @@
             } else {
                 // 选先手
                 if (['choose'].includes(cfg.buildPhase)) {
-                    handleChoose(x, y);
+                    processChoose(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         const lastAction = cfg.history[cfg.history.length - 1];
@@ -1583,7 +1583,7 @@
 
                 // 选中己方棋子
                 else if (state.type === getCurrentPlayer()) {
-                    handleSelect(x, y);
+                    processSelect(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         sendGameAction({
@@ -1601,7 +1601,7 @@
                     && cfg.selected
                     && isInRange(x, y, cfg.selected.x, cfg.selected.y, RANGE.EAT) 
                     && hasAdvantage()) {
-                    handleEat(x, y);
+                    processEat(x, y);
                     // 网络对战时发送历史记录的最后一条
                     if (isNetworkGame) {
                         const lastAction = cfg.history[cfg.history.length - 1];
@@ -2067,12 +2067,12 @@
                     case 'subX':
                     case 'subO':
                         // 建城操作
-                        handleBuild(action.x, action.y, false);
+                        processBuild(action.x, action.y, false);
                         break;
                     case 'layX':
                     case 'layO':
                         // 置子操作
-                        handleLay(action.x, action.y, false);
+                        processLay(action.x, action.y, false);
                         break;
                     case 'choose':
                         // 选择先手
@@ -2081,12 +2081,12 @@
                     case 'x-place':
                     case 'o-place':
                         // 放置棋子操作
-                        handlePlace(action.x, action.y, false);
+                        processPlace(action.x, action.y, false);
                         break;
                     case 'x-eat':
                     case 'o-eat':
                         // 吃子操作
-                        handleEat(action.x, action.y, false);
+                        processEat(action.x, action.y, false);
                         break;
                     case 'random':
                         // 随机地图操作
@@ -2147,6 +2147,9 @@
             }
             
             replayHistory(targetStep);
+            
+            // 重新渲染历史记录面板
+            renderFullHistory();
             
             // console.log('=== 悔棋后历史记录 ===');
             // console.log('历史记录长度:', cfg.history.length);
@@ -2517,7 +2520,7 @@
         }
 
         //============== 导入/导出游戏数据 =============
-        function export_data() {
+        function exportData() {
             if (isNetworkGame) {
                 // export不论是否轮到都可以申请
                 alert('等待对方同意导出棋局...');
@@ -2529,7 +2532,7 @@
             }
         }
 
-        function import_data() {
+        function importData() {
             const fileInput = document.createElement("input");
             fileInput.type = "file";
             fileInput.accept = ".json";
@@ -2829,39 +2832,39 @@
                 case 'subX':
                 case 'subO':
                     // 建城操作
-                    handleBuild(action.x, action.y, true);
+                    processBuild(action.x, action.y, true);
                     isMyTurn = false;
                     updateDisplay(true);
                     break;
                 case 'layX':
                     // 置子操作
-                    handleLay(action.x, action.y, true);
+                    processLay(action.x, action.y, true);
                     isMyTurn = false;
                     updateDisplay(true);
                     break;
                 case 'layO':
                     // 置子操作
-                    handleLay(action.x, action.y, true);
+                    processLay(action.x, action.y, true);
                     isMyTurn = true;
                     updateDisplay(true);
                     break;
                 case 'choose':
                     // 选择先手
-                    handleChoose(action.x, action.y, true);
+                    processChoose(action.x, action.y, true);
                     isMyTurn = false;
                     updateDisplay(true);
                     break;
                 case 'x-place':
                 case 'o-place':
                     // 放置棋子
-                    handlePlace(action.x, action.y, true);
+                    processPlace(action.x, action.y, true);
                     isMyTurn = true;
                     updateDisplay(true);
                     break;
                 case 'x-eat':
                 case 'o-eat':
                     // 吃子操作
-                    handleEat(action.x, action.y, true);
+                    processEat(action.x, action.y, true);
                     isMyTurn = true;
                     updateDisplay(true);
                     break;
@@ -2905,7 +2908,7 @@
                     break;
                 case 'select':
                     // 选中操作
-                    handleSelect(action.x, action.y);
+                    processSelect(action.x, action.y);
                     isMyTurn = false;
                     break;
                 case 'undo':
@@ -3056,6 +3059,9 @@
             }
             
             isNetworkGame = true; // 设置为网络对战模式
+
+            // 重新渲染历史记录面板
+            renderFullHistory();
 
             initBoard();
             drawBoardBg();

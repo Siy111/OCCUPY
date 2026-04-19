@@ -79,6 +79,16 @@ function handleMessage(ws, data) {
         case 'sync_response':
             handleSyncResponse(ws, data);
             break;
+        case 'undo':
+        case 'restart':
+        case 'calculate':
+        case 'export':
+        case 'undo-reply':
+        case 'restart-reply':
+        case 'calculate-reply':
+        case 'export-reply':
+            broadcastToRoomMembers(ws, data);
+            break;
         // case 'action_request':
         //     broadcastActionRequest(ws, data);
         //     break;
@@ -315,6 +325,23 @@ function broadcastSyncState(ws, data) {
                             state: data.state,
                             isMyTurn: data.isMyTurn
                         }));
+                    }
+                });
+                break;
+            }
+        }
+    }
+}
+
+// 广播消息到房间成员（排除发送者）
+function broadcastToRoomMembers(ws, message) {
+    for (const [roomId, room] of rooms.entries()) {
+        // 找到包含当前WebSocket的房间
+        for (const [role, player] of room.playerMap.entries()) {
+            if (player === ws) {
+                room.playerMap.forEach((player, role) => {
+                    if (player !== ws) {
+                        player.send(JSON.stringify(message));
                     }
                 });
                 break;
