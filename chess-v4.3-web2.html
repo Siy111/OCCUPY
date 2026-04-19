@@ -42,14 +42,9 @@
         
         #virtualBoardContainer {
             position: relative;
-            width: calc(80 * 13px);
-            height: calc(80 * 13px);
         }
         
-        #chessboard-bg, #chessboard {
-            width: calc(80 * 13px);
-            height: calc(80 * 13px);
-            transform: scale(1);
+        #boardBg, #board {
             transform-origin: 0 0;
             transition: transform 0.2s ease;
             will-change: transform;
@@ -268,8 +263,8 @@
         <div class="chessboard-container" id="scrollArea">
             <!-- 新增虚拟容器：解决缩放后滚动范围问题 -->
             <div id="virtualBoardContainer">
-                <canvas id="chessboard-bg" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
-                <canvas id="chessboard" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
+                <canvas id="boardBg" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
+                <canvas id="board" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
             </div>
         </div>
 
@@ -280,11 +275,11 @@
                     <div class="network-controls">
                         <div class="info-item">
                             <span>连接状态：</span>
-                            <span class="value" id="connection-status">未连接</span>
+                            <span class="value" id="connectionStatus">未连接</span>
                         </div>
                         <div class="info-item" style="margin-top: 5px;">
                             <span>服务器IP：</span>
-                            <input type="text" id="server-ip-input" value="localhost" placeholder="输入服务器IP" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
+                            <input type="text" id="serverIpInput" value="localhost" placeholder="输入服务器IP" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
                         </div>
                         <div class="btn-group" style="margin-top: 10px;">
                             <button onclick="game.network.connectToServer()">连接服务器</button>
@@ -296,15 +291,15 @@
                         </div>
                         <div class="info-item" style="margin-top: 10px;">
                             <span>房间ID：</span>
-                            <input type="text" id="room-id-input" placeholder="输入房间ID" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
+                            <input type="text" id="roomIdInput" placeholder="输入房间ID" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
                         </div>
                         <div class="info-item" style="margin-top: 5px;">
                             <span>角色：</span>
-                            <span class="value" id="player-role">未分配</span>
+                            <span class="value" id="playerRole">未分配</span>
                         </div>
                         <div class="info-item" style="margin-top: 5px;">
                             <span>游戏状态：</span>
-                            <span class="value" id="game-status">准备中</span>
+                            <span class="value" id="gameStatus">准备中</span>
                         </div>
                     </div>
                 </div>
@@ -313,36 +308,36 @@
                     <h3>棋局状态</h3>
                     <div class="info-item">
                         <span>当前操作：</span>
-                        <span class="value" id="current-action">建✕主城</span>
+                        <span class="value" id="currentAction">建✕主城</span>
                     </div>
                     <div class="info-item">
                         <span>棋子数量：</span>
                         <span>
-                            <span class="value" id="circle-count">◯ 0</span> | 
-                            <span class="value" id="cross-count">✕ 0</span> | 
-                            <span class="value" id="mix-count">⨂ 0</span>
+                            <span class="value" id="circleCount">◯ 0</span> | 
+                            <span class="value" id="crossCount">✕ 0</span> | 
+                            <span class="value" id="mixCount">⨂ 0</span>
                         </span>
                     </div>
                     <div class="info-item">
                         <span>主城：</span>
                         <span>
-                            <span class="value" id="main-circle-count">◯ 1</span> | 
-                            <span class="value" id="main-cross-count">✕ 1</span>
+                            <span class="value" id="mainCircleCount">◯ 1</span> | 
+                            <span class="value" id="mainCrossCount">✕ 1</span>
                         </span>
                     </div>
                     <div class="info-item">
                         <span>副城：</span>
                         <span>
-                            <span class="value" id="sub-circle-count">◯ 0</span> | 
-                            <span class="value" id="sub-cross-count">✕ 0</span>
+                            <span class="value" id="subCircleCount">◯ 0</span> | 
+                            <span class="value" id="subCrossCount">✕ 0</span>
                         </span>
                     </div>
                     <div class="btn-group">
                         <button onclick="game.resetGame()">重新开局</button>
-                        <button onclick="game.undoMove()" id="undo-btn" disabled>悔棋</button>
+                        <button onclick="game.undoMove()" id="undoBtn" disabled>悔棋</button>
                         <button onclick="game.calculateEndgame()">结算胜负</button>
                     </div>
-                    <button class="random-map-btn" id="random-map-btn" onclick="game.createRandomCities()">随机地图</button>
+                    <button class="random-map-btn" id="randomMapBtn" onclick="game.createRandomCities()">随机地图</button>
                     <div class="btn-group resource-toggle-group">
                         <input type="checkbox" id="randomCitiesToggle" name="randomCitiesToggle" checked>
                         <label for="randomCitiesToggle">随机城池</label>
@@ -356,25 +351,25 @@
                     <div class="info-item">
                         <span>战损：</span>
                         <span>
-                            <span class="value" id="circle-kill">◯ 0</span> | 
-                            <span class="value" id="cross-kill">✕ 0</span>
+                            <span class="value" id="circleKill">◯ 0</span> | 
+                            <span class="value" id="crossKill">✕ 0</span>
                         </span>
                     </div>
                     <div class="info-item">
                         <span>资源：</span>
                         <span>
-                            <span class="value" id="circle-resources">◯ 0</span> | 
-                            <span class="value" id="cross-resources">✕ 0</span>
+                            <span class="value" id="circleResources">◯ 0</span> | 
+                            <span class="value" id="crossResources">✕ 0</span>
                         </span>
                     </div>
                     <div class="info-item">
                         <span>副城兵力：</span>
                         <span>
-                            <span class="value" id="circle-subcity">◯ 0</span> | 
-                            <span class="value" id="cross-subcity">✕ 0</span>
+                            <span class="value" id="circleSubcity">◯ 0</span> | 
+                            <span class="value" id="crossSubcity">✕ 0</span>
                         </span>
                     </div>
-                    <div class="winner" id="winner-text">- 未结算 -</div>
+                    <div class="winner" id="winnerText">- 未结算 -</div>
                 </div>
 
                 <div class="panel">
@@ -387,15 +382,15 @@
                 </div>
             </div>
             <div class="zoom-control-wrapper">
-                <div class="zoom-btn minus" id="zoom-out-btn" onclick="game.ui.zoomOut()">-</div>
+                <div class="zoom-btn minus" id="zoomOutBtn" onclick="game.ui.zoomOut()">-</div>
                 <div class="zoom-slider-container">
-                    <div class="zoom-slider" id="zoom-slider">
-                        <div class="zoom-fill" id="zoom-fill" style="width: 50%"></div>
-                        <div class="zoom-thumb" id="zoom-thumb" style="left: 50%"></div>
+                    <div class="zoom-slider" id="zoomSlider">
+                        <div class="zoom-fill" id="zoomFill" style="width: 50%"></div>
+                        <div class="zoom-thumb" id="zoomThumb" style="left: 50%"></div>
                     </div>
                 </div>
-                <div class="zoom-btn plus" id="zoom-in-btn" onclick="game.ui.zoomIn()">+</div>
-                <div class="zoom-value" id="zoom-value">100%</div>
+                <div class="zoom-btn plus" id="zoomInBtn" onclick="game.ui.zoomIn()">+</div>
+                <div class="zoom-value" id="zoomValue">100%</div>
             </div>
         </div>
         
@@ -404,8 +399,8 @@
     <script>
         // 游戏配置参数（运行时不会改变）
         const gameConfig = {
-            size: 80, // 棋盘大小
-            cell: 12, // 棋盘单元格大小
+            size:72, // 棋盘大小
+            cell: 13, // 棋盘单元格大小
             zoom: 1, // 缩放比例
             minZoom: 0.41,
             maxZoom: 1.5
@@ -421,38 +416,38 @@
         class DOMCache {
             constructor() {
                 this.elements = {
-                    boardBg: document.getElementById('chessboard-bg'),
-                    ctxBg: document.getElementById('chessboard-bg').getContext('2d'),
-                    board: document.getElementById('chessboard'),
-                    ctx: document.getElementById('chessboard').getContext('2d'),
+                    boardBg: document.getElementById('boardBg'),
+                    ctxBg: document.getElementById('boardBg').getContext('2d'),
+                    board: document.getElementById('board'),
+                    ctx: document.getElementById('board').getContext('2d'),
                     scrollArea: document.getElementById('scrollArea'),
                     virtualBoardContainer: document.getElementById('virtualBoardContainer'),
-                    currentAction: document.getElementById('current-action'),
-                    circleCount: document.getElementById('circle-count'),
-                    crossCount: document.getElementById('cross-count'),
-                    mixCount: document.getElementById('mix-count'),
-                    mainCircleCount: document.getElementById('main-circle-count'),
-                    mainCrossCount: document.getElementById('main-cross-count'),
-                    subCircleCount: document.getElementById('sub-circle-count'),
-                    subCrossCount: document.getElementById('sub-cross-count'),
-                    undoBtn: document.getElementById('undo-btn'),
-                    randomMapBtn: document.getElementById('random-map-btn'),
-                    zoomSlider: document.getElementById('zoom-slider'),
-                    zoomFill: document.getElementById('zoom-fill'),
-                    zoomThumb: document.getElementById('zoom-thumb'),
-                    zoomValue: document.getElementById('zoom-value'),
-                    circleKill: document.getElementById('circle-kill'),
-                    crossKill: document.getElementById('cross-kill'),
-                    circleResources: document.getElementById('circle-resources'),
-                    crossResources: document.getElementById('cross-resources'),
-                    circleSubcity: document.getElementById('circle-subcity'),
-                    crossSubcity: document.getElementById('cross-subcity'),
-                    winnerText: document.getElementById('winner-text'),
-                    connectionStatus: document.getElementById('connection-status'),
-                    playerRole: document.getElementById('player-role'),
-                    gameStatus: document.getElementById('game-status'),
-                    roomIdInput: document.getElementById('room-id-input'),
-                    serverIpInput: document.getElementById('server-ip-input'),
+                    currentAction: document.getElementById('currentAction'),
+                    circleCount: document.getElementById('circleCount'),
+                    crossCount: document.getElementById('crossCount'),
+                    mixCount: document.getElementById('mixCount'),
+                    mainCircleCount: document.getElementById('mainCircleCount'),
+                    mainCrossCount: document.getElementById('mainCrossCount'),
+                    subCircleCount: document.getElementById('subCircleCount'),
+                    subCrossCount: document.getElementById('subCrossCount'),
+                    undoBtn: document.getElementById('undoBtn'),
+                    randomMapBtn: document.getElementById('randomMapBtn'),
+                    zoomSlider: document.getElementById('zoomSlider'),
+                    zoomFill: document.getElementById('zoomFill'),
+                    zoomThumb: document.getElementById('zoomThumb'),
+                    zoomValue: document.getElementById('zoomValue'),
+                    circleKill: document.getElementById('circleKill'),
+                    crossKill: document.getElementById('crossKill'),
+                    circleResources: document.getElementById('circleResources'),
+                    crossResources: document.getElementById('crossResources'),
+                    circleSubcity: document.getElementById('circleSubcity'),
+                    crossSubcity: document.getElementById('crossSubcity'),
+                    winnerText: document.getElementById('winnerText'),
+                    connectionStatus: document.getElementById('connectionStatus'),
+                    playerRole: document.getElementById('playerRole'),
+                    gameStatus: document.getElementById('gameStatus'),
+                    roomIdInput: document.getElementById('roomIdInput'),
+                    serverIpInput: document.getElementById('serverIpInput'),
                     randomCitiesToggle: document.getElementById('randomCitiesToggle'),
                     resourceToggle: document.getElementById('resourceToggle')
                 };
@@ -584,9 +579,6 @@
             }
 
             processCellClick(x, y) {
-
-                console.log('hi');
-
                 // 网络对战时，检查是否轮到自己的回合
                 if (this.network.isNetworkGame && !this.network.isMyTurn) {
                     return;
@@ -1907,9 +1899,9 @@
                 const action = this.game.state.history[index];
                 if (action && action.fromX !== undefined && action.fromY !== undefined) this.flashCell(action.fromX, action.fromY, 'rgba(128, 200, 255, 0.8)', 3000);
                 if (action && action.x !== undefined && action.y !== undefined) {
-                    if (action.opt === 'x-place' || action.opt === 'o-place') this.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.8)', 3000);
+                    if (action.opt === 'x-place' || action.opt === 'o-place') this.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.5)', 3000);
                     else if (action.opt === 'x-eat' || action.opt === 'o-eat') this.flashCell(action.x, action.y, 'rgba(255, 204, 199, 0.8)', 3000);
-                    else this.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.8)', 3000);
+                    else this.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.5)', 3000);
                 }
             }
 
@@ -2113,9 +2105,9 @@
                 }
                 if (action && action.fromX !== undefined && action.fromY !== undefined) this.game.status.flashCell(action.fromX, action.fromY, 'rgba(128, 200, 255, 0.8)', 3000);
                 if (action && action.x !== undefined && action.y !== undefined) {
-                    if (action.opt === 'x-place' || action.opt === 'o-place') this.game.status.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.8)', 3000);
+                    if (action.opt === 'x-place' || action.opt === 'o-place') this.game.status.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.5)', 3000);
                     else if (action.opt === 'x-eat' || action.opt === 'o-eat') this.game.status.flashCell(action.x, action.y, 'rgba(255, 204, 199, 0.8)', 3000);
-                    else if (action.opt !== 'select') this.game.status.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.8)', 3000);
+                    else if (action.opt !== 'select') this.game.status.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.5)', 3000);
                 }
                 this.domCache.get('gameStatus').textContent = this.isMyTurn ? '轮到你' : '等待对手';
             }
