@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>圈叉棋</title>
+    <title>占城棋</title>
     <style>
         * {
             margin: 0;
@@ -2213,7 +2213,7 @@
             performExport() {
                 const exportData = { meta: { version: "6", timestamp: new Date().toISOString(), buttons: { randomCitiesToggle: this.domCache.get('randomCitiesToggle').checked, resourceToggle: this.domCache.get('resourceToggle').checked } }, history: this.game.state.history };
                 const jsonStr = JSON.stringify(exportData); const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
-                const defaultBase = `圈叉棋_棋局${new Date().getTime()}`; let inputBase = prompt('请输入导出文件名：', defaultBase);
+                const defaultBase = `占城棋_棋局${new Date().getTime()}`; let inputBase = prompt('请输入导出文件名：', defaultBase);
                 if (inputBase === null) return; inputBase = inputBase.trim(); if (inputBase === '') inputBase = defaultBase;
                 inputBase = inputBase.replace(/[\\\/:*?"<>|]/g, '_');
                 const fileName = inputBase.toLowerCase().endsWith('.json') ? inputBase : `${inputBase}.json`;
