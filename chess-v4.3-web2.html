@@ -277,10 +277,6 @@
                             <span>连接状态：</span>
                             <span class="value" id="connectionStatus">未连接</span>
                         </div>
-                        <div class="info-item" style="margin-top: 5px;">
-                            <span>服务器IP：</span>
-                            <input type="text" id="serverIpInput" value="localhost" placeholder="输入服务器IP" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
-                        </div>
                         <div class="btn-group" style="margin-top: 10px;">
                             <button onclick="game.network.connectToServer()">连接服务器</button>
                             <button onclick="game.network.disconnectServer()">断开连接</button>
@@ -293,6 +289,7 @@
                             <span>房间ID：</span>
                             <input type="text" id="roomIdInput" placeholder="输入房间ID" style="flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
                         </div>
+                        
                         <div class="info-item" style="margin-top: 5px;">
                             <span>角色：</span>
                             <span class="value" id="playerRole">未分配</span>
@@ -301,6 +298,8 @@
                             <span>游戏状态：</span>
                             <span class="value" id="gameStatus">准备中</span>
                         </div>
+                        
+                        
                     </div>
                 </div>
 
@@ -349,14 +348,14 @@
                 <div class="panel">
                     <h3>战果统计</h3>
                     <div class="info-item">
-                        <span>战损：</span>
+                        <span>残骸统计：</span>
                         <span>
                             <span class="value" id="circleKill">◯ 0</span> | 
                             <span class="value" id="crossKill">✕ 0</span>
                         </span>
                     </div>
                     <div class="info-item">
-                        <span>资源：</span>
+                        <span>资源占有：</span>
                         <span>
                             <span class="value" id="circleResources">◯ 0</span> | 
                             <span class="value" id="crossResources">✕ 0</span>
@@ -447,7 +446,6 @@
                     playerRole: document.getElementById('playerRole'),
                     gameStatus: document.getElementById('gameStatus'),
                     roomIdInput: document.getElementById('roomIdInput'),
-                    serverIpInput: document.getElementById('serverIpInput'),
                     randomCitiesToggle: document.getElementById('randomCitiesToggle'),
                     resourceToggle: document.getElementById('resourceToggle')
                 };
@@ -2007,7 +2005,8 @@
             connectToServer() {
                 if (this.ws) { alert('已经连接到服务器'); return; }
                 try {
-                    const serverIp = this.domCache.get('serverIpInput').value.trim() || 'localhost';
+                    const serverIp = prompt('请输入服务器IP:', 'localhost');
+                    if (!serverIp) return; // 用户取消输入
                     const serverUrl = `ws://${serverIp}:8080`;
                     this.ws = new WebSocket(serverUrl);
                     this.ws.onopen = () => { console.log('WebSocket连接已建立'); this.domCache.get('connectionStatus').textContent = '已连接'; this.domCache.get('connectionStatus').style.color = '#4CAF50'; };
