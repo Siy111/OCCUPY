@@ -2103,6 +2103,27 @@
                         else { this.sendGameAction({ opt: 'export-reply', reply: false }); }
                         break;
                     case 'export-reply': if (action.reply) { this.game.ui.performExport(); } else { alert('对手拒绝导出棋局'); } break;
+                    case 'import_game':
+                        // 接收对方导入棋局的请求
+                        this.game.state.history = action.history || [];
+                        this.game.board.replayHistory(this.game.state.history.length - 1);
+                        this.game.status.clearFlashQueue();
+                        this.game.status.renderFullHistory();
+                        this.game.board.initBoard();
+                        this.game.board.drawBoardBg();
+                        this.game.board.drawBoard();
+                        this.game.status.updateDisplay();
+                        
+                        // 确定自己的角色和回合
+                        this.playerRole = action.playerRole === 'first_player' ? 'second_player' : 'first_player';
+                        const myPlayerType = this.playerRole === 'first_player' ? 'cross' : 'circle';
+                        this.isMyTurn = this.game.state.buildPhase === (myPlayerType === 'cross' ? 'x-game' : 'o-game');
+                        
+                        this.domCache.get('playerRole').textContent = myPlayerType === 'cross' ? 'X方' : 'O方';
+                        this.domCache.get('gameStatus').textContent = this.isMyTurn ? '轮到你' : '等待对手';
+                        
+                        alert('对手导入了新的棋局，已同步状态');
+                        break;
                 }
                 if (action && action.fromX !== undefined && action.fromY !== undefined) this.game.status.flashCell(action.fromX, action.fromY, 'rgba(128, 200, 255, 0.8)', 3000);
                 if (action && action.x !== undefined && action.y !== undefined) {
@@ -2232,6 +2253,30 @@
                         try {
                             const importData = JSON.parse(event.target.result);
                             if (!this.validateImportData(importData)) { alert("导入失败：文件格式错误或数据不完整！"); return; }
+                            
+                            // 网络对战时，提示选择角色
+                            if (this.game.network.isNetworkGame && this.game.network.ws && this.game.network.ws.readyState === WebSocket.OPEN) {
+                                const choice = prompt('请选择角色：\n1. X方\n2. O方', '1');
+                                if (!choice || (choice !== '1' && choice !== '2')) {
+                                    alert('取消导入');
+                                    return;
+                                }
+                                
+                                const playerRole = choice === '1' ? 'cross' : 'circle';
+                                this.game.network.playerRole = playerRole === 'cross' ? 'first_player' : 'second_player';
+                                this.game.network.isMyTurn = this.game.state.buildPhase === (playerRole === 'cross' ? 'x-game' : 'o-game');
+                                
+                                // 同步状态给对方
+                                this.game.network.sendGameAction({
+                                    opt: 'import_game',
+                                    playerRole: this.game.network.playerRole,
+                                    history: importData.history
+                                });
+                                
+                                this.domCache.get('playerRole').textContent = playerRole === 'cross' ? 'X方' : 'O方';
+                                this.domCache.get('gameStatus').textContent = this.game.network.isMyTurn ? '轮到你' : '等待对手';
+                            }
+                            
                             this.restoreGameState(importData);
                             this.game.board.initBoard(); this.game.board.drawBoardBg(); this.game.board.drawBoard();
                             this.game.ui.updateZoomSlider(); this.game.status.updateDisplay(); alert("棋局导入成功！");
