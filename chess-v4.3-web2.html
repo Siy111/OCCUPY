@@ -274,7 +274,7 @@
                     <h3>在线对战</h3>
                     <div class="network-controls">
                         <div class="info-item">
-                            <span>连接状态：</span>
+                            <span>网络连接：</span>
                             <span class="value" id="connectionStatus">未连接</span>
                         </div>
                         <div class="btn-group" style="margin-top: 10px;">
@@ -2000,16 +2000,18 @@
                 this.isNetworkGame = false;
                 this.playerRole = null;
                 this.isMyTurn = false;
+                this.serverIp = null;
             }
 
             connectToServer() {
                 if (this.ws) { alert('已经连接到服务器'); return; }
                 try {
                     const serverIp = prompt('请输入服务器IP:', 'localhost');
-                    if (!serverIp) return; // 用户取消输入
+                    if (!serverIp) return;
+                    this.serverIp = serverIp;
                     const serverUrl = `ws://${serverIp}:8080`;
                     this.ws = new WebSocket(serverUrl);
-                    this.ws.onopen = () => { console.log('WebSocket连接已建立'); this.domCache.get('connectionStatus').textContent = '已连接'; this.domCache.get('connectionStatus').style.color = '#4CAF50'; };
+                    this.ws.onopen = () => { console.log('WebSocket连接已建立'); this.domCache.get('connectionStatus').textContent = serverIp; this.domCache.get('connectionStatus').style.color = '#4CAF50'; };
                     this.ws.onmessage = (event) => { try { const data = JSON.parse(event.data); this.handleWebSocketMessage(data); } catch (error) { console.error('消息解析错误:', error); } };
                     this.ws.onclose = () => { console.log('WebSocket连接已关闭'); this.domCache.get('connectionStatus').textContent = '未连接'; this.domCache.get('connectionStatus').style.color = '#f44336'; this.ws = null; };
                     this.ws.onerror = (error) => { console.error('WebSocket错误:', error); this.domCache.get('connectionStatus').textContent = '连接错误'; this.domCache.get('connectionStatus').style.color = '#f44336'; };
@@ -2021,7 +2023,7 @@
                     this.ws.close(); this.ws = null;
                     this.domCache.get('connectionStatus').textContent = '未连接'; this.domCache.get('connectionStatus').style.color = '#f44336';
                     this.domCache.get('playerRole').textContent = '未分配'; this.domCache.get('gameStatus').textContent = '准备中';
-                    this.isNetworkGame = false; this.playerRole = null; this.isMyTurn = false;
+                    this.isNetworkGame = false; this.playerRole = null; this.isMyTurn = false; this.serverIp = null;
                     alert('已断开服务器连接');
                 } else { alert('未连接到服务器'); }
             }
