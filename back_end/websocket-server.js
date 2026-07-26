@@ -42,9 +42,16 @@ wss.on('connection', (ws) => {
                     // 两个玩家都断开，删除房间
                     rooms.delete(roomId);
                     console.log(`房间 ${roomId} 已删除`);
+                } else if (room.playerMap.size === 1 && !room.playerMap.has('first_player')) {
+                    // 房主断开，剩余的是客人 → 删除房间
+                    broadcastToRoom(roomId, {
+                        type: 'player_left',
+                        message: '房主离开了游戏'
+                    });
+                    rooms.delete(roomId);
+                    console.log(`房主断开连接，房间 ${roomId} 已删除`);
                 } else {
-                    // 保留剩余玩家的角色不变
-                    // 一个玩家断开，立即通知剩余玩家
+                    // 客人断开，房主还在 → 保留房间
                     broadcastToRoom(roomId, {
                         type: 'player_left',
                         message: '对手离开了游戏'
@@ -89,53 +96,16 @@ function handleMessage(ws, data) {
         case 'export-reply':
             broadcastToRoomMembers(ws, data);
             break;
-        // case 'action_request':
-        //     broadcastActionRequest(ws, data);
-        //     break;
-        // case 'action_approved':
-        //     broadcastActionResponse(ws, data);
-        //     break;
-        // case 'action_rejected':
-        //     broadcastActionResponse(ws, data);
-        //     break;
+        case 'close_room':
+            closeRoom(ws, data);
+            break;
+        case 'leave_room':
+            leaveRoom(ws, data);
+            break;
         default:
             console.log('未知消息类型:', data.type);
     }
 }
-
-// // 广播操作申请
-// function broadcastActionRequest(ws, data) {
-//     for (const [roomId, room] of rooms.entries()) {
-//         if (room.players.includes(ws)) {
-//             room.players.forEach(player => {
-//                 if (player !== ws) {
-//                     player.send(JSON.stringify({
-//                         type: 'action_request',
-//                         actionType: data.actionType
-//                     }));
-//                 }
-//             });
-//             break;
-//         }
-//     }
-// }
-
-// // 广播操作响应
-// function broadcastActionResponse(ws, data) {
-//     for (const [roomId, room] of rooms.entries()) {
-//         if (room.players.includes(ws)) {
-//             room.players.forEach(player => {
-//                 if (player !== ws) {
-//                     player.send(JSON.stringify({
-//                         type: data.type,
-//                         actionType: data.actionType
-//                     }));
-//                 }
-//             });
-//             break;
-//         }
-//     }
-// }
 
 // 创建房间
 function createRoom(ws, data) {
@@ -146,16 +116,63 @@ function createRoom(ws, data) {
         gameState: null,
         isGameStarted: false
     });
-    // 房主加入房间，暂不分配角色，等待第二个玩家加入后随机分配
-    rooms.get(roomId).playerMap.set('temp', ws);
+    // 房主固定为先手
+    rooms.get(roomId).playerMap.set('first_player', ws);
     
     ws.send(JSON.stringify({
         type: 'room_created',
         roomId: roomId,
+        isHost: true,
         message: '房间创建成功'
     }));
     
     console.log(`房间 ${roomId} 创建成功`);
+}
+
+// 关闭房间（房主操作）
+function closeRoom(ws, data) {
+    for (const [roomId, room] of rooms.entries()) {
+        if (room.host === ws) {
+            // 通知另一个玩家（如果有）
+            room.playerMap.forEach((player, role) => {
+                if (player !== ws) {
+                    player.send(JSON.stringify({
+                        type: 'player_left',
+                        message: '房主关闭了房间'
+                    }));
+                }
+            });
+            rooms.delete(roomId);
+            console.log(`房主关闭了房间 ${roomId}`);
+            return;
+        }
+    }
+}
+
+// 退出房间（加入者操作）
+function leaveRoom(ws, data) {
+    for (const [roomId, room] of rooms.entries()) {
+        for (const [role, player] of room.playerMap.entries()) {
+            if (player === ws) {
+                room.playerMap.delete(role);
+                console.log(`玩家退出房间 ${roomId}`);
+                
+                if (room.playerMap.size === 0) {
+                    rooms.delete(roomId);
+                    console.log(`房间 ${roomId} 已删除`);
+                } else {
+                    // 通知房主
+                    room.playerMap.forEach((player, role) => {
+                        player.send(JSON.stringify({
+                            type: 'player_left',
+                            message: '对手退出了房间'
+                        }));
+                    });
+                }
+                return;
+            }
+        }
+    }
 }
 
 // 加入房间
@@ -172,64 +189,39 @@ function joinRoom(ws, data) {
             ws.send(JSON.stringify({
                 type: 'room_joined',
                 roomId: roomId,
+                isHost: true,
                 message: '重新加入房间成功，等待对手'
             }));
             
             console.log(`玩家重新加入房间 ${roomId} 作为房主`);
         } else if (room.playerMap.size === 1) {
-            // 房间有一个玩家，新玩家加入
-            // 获取现有玩家和角色
-            const existingEntries = Array.from(room.playerMap.entries());
-            const [existingRole, existingPlayer] = existingEntries[0];
+            // 房间有一个玩家（房主），新玩家作为客人加入
+            room.playerMap.set('second_player', ws);
             
-            if (existingRole === 'temp') {
-                // 现有玩家是临时角色，随机分配角色
-                const roles = ['first_player', 'second_player'];
-                const firstRole = roles[Math.floor(Math.random() * 2)];
-                const secondRole = roles.find(r => r !== firstRole);
-                
-                // 清空临时映射并分配角色
-                room.playerMap.clear();
-                room.playerMap.set(firstRole, existingPlayer);
-                room.playerMap.set(secondRole, ws);
-            } else {
-                // 现有玩家已有角色，分配另一个角色
-                const availableRole = existingRole === 'first_player' ? 'second_player' : 'first_player';
-                room.playerMap.set(availableRole, ws);
-            }
-            
-            // 通知新玩家加入成功
+            // 通知客人加入成功
             ws.send(JSON.stringify({
                 type: 'room_joined',
                 roomId: roomId,
+                isHost: false,
                 message: '加入房间成功'
             }));
             
-            if (!room.isGameStarted) {
-                // 游戏尚未开始，开始游戏
-                startGame(roomId);
-            } else {
-                // 游戏正在进行中，广播游戏继续，包含角色信息
-                room.playerMap.forEach((player, role) => {
-                    player.send(JSON.stringify({
-                        type: 'game_continue',
-                        message: '游戏继续',
-                        role: role
-                    }));
-                });
+            // 通知房主有玩家加入
+            const hostWs = room.playerMap.get('first_player');
+            if (hostWs) {
+                hostWs.send(JSON.stringify({
+                    type: 'player_joined',
+                    message: '对手已加入'
+                }));
                 
-                // 向现有玩家发送同步请求（发送给非新加入的玩家）
-                room.playerMap.forEach((player, role) => {
-                    if (player !== ws) {
-                        player.send(JSON.stringify({
-                            type: 'sync_request',
-                            message: '请发送游戏状态'
-                        }));
-                    }
-                });
+                // 向房主请求同步游戏状态
+                hostWs.send(JSON.stringify({
+                    type: 'sync_request',
+                    message: '请发送游戏状态'
+                }));
             }
             
-            console.log(`玩家加入房间 ${roomId}`);
+            console.log(`客人加入房间 ${roomId}，请求同步`);
         } else {
             ws.send(JSON.stringify({
                 type: 'error',
@@ -305,6 +297,11 @@ function handleSyncResponse(ws, data) {
                         console.log(`向新玩家发送同步状态，房间 ${roomId}`);
                     }
                 });
+                
+                // 如果游戏尚未开始，同步后开始游戏
+                if (!room.isGameStarted) {
+                    startGame(roomId);
+                }
                 break;
             }
         }
@@ -371,7 +368,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`WebSocket服务器启动在端口 ${PORT}`);
     console.log(`本地访问地址: ws://localhost:${PORT}`);
     console.log(`局域网访问地址: ws://<本机IP>:${PORT}`);
-    console.log('请在客户端输入服务器的局域网IP地址进行连接');
 });
 
 console.log('WebSocket服务器已启动');
