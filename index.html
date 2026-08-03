@@ -1964,16 +1964,42 @@
                 scrollArea.addEventListener('mousedown', handleMouseDown);
                 document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); document.addEventListener('mouseleave', handleMouseUp);
 
-                // 双指触摸缩放
-                let initialDistance = 0, initialZoom = 1, isPinching = false;
-                const board = this.game.boardCanvas;
-                const getDistance = (touch1, touch2) => Math.sqrt(Math.pow(touch2.clientX - touch1.clientX, 2) + Math.pow(touch2.clientY - touch1.clientY, 2));
-                const handleTouchStart = (e) => { if (e.touches.length === 2) { isPinching = true; initialDistance = getDistance(e.touches[0], e.touches[1]); initialZoom = appState.zoom; } };
-                const handleTouchMove = (e) => { if (isPinching && e.touches.length === 2) { e.preventDefault(); const currentDistance = getDistance(e.touches[0], e.touches[1]); const scale = currentDistance / initialDistance; let newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, initialZoom * scale)); this.setZoom(newZoom, true); } };
-                const handleTouchEnd = () => { isPinching = false; };
-                board.addEventListener('touchstart', handleTouchStart);
-                board.addEventListener('touchmove', handleTouchMove, { passive: false });
-                board.addEventListener('touchend', handleTouchEnd); board.addEventListener('touchcancel', handleTouchEnd);
+                // 鼠标滚轮缩放（以光标为中心）
+                scrollArea.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const rect = scrollArea.getBoundingClientRect();
+                    const dy = Math.max(-100, Math.min(100, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
+                    const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, appState.zoom * Math.pow(1.1, -dy / 100)));
+                    this.setZoom(newZoom, true, e.clientX - rect.left, e.clientY - rect.top);
+                }, { passive: false });
+
+                // 双指触摸缩放（中心跟随手指，如同查看图片）
+                let pinch = null;
+                const gesture = (e) => {
+                    const rect = scrollArea.getBoundingClientRect(), [t1, t2] = e.touches;
+                    return {
+                        dist: Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY),
+                        x: (t1.clientX + t2.clientX) / 2 - rect.left,
+                        y: (t1.clientY + t2.clientY) / 2 - rect.top
+                    };
+                };
+                const handleTouchStart = (e) => {
+                    if (e.touches.length !== 2) return;
+                    e.preventDefault();
+                    const g = gesture(e);
+                    pinch = { zoom: appState.zoom, dist: g.dist, anchor: { x: (g.x + scrollArea.scrollLeft) / appState.zoom, y: (g.y + scrollArea.scrollTop) / appState.zoom } };
+                };
+                const handleTouchMove = (e) => {
+                    if (!pinch || e.touches.length !== 2) return;
+                    e.preventDefault();
+                    const g = gesture(e);
+                    const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, pinch.zoom * (g.dist / pinch.dist)));
+                    this.setZoom(newZoom, true, g.x, g.y, pinch.anchor.x, pinch.anchor.y);
+                };
+                const handleTouchEnd = () => { pinch = null; };
+                scrollArea.addEventListener('touchstart', handleTouchStart, { passive: false });
+                scrollArea.addEventListener('touchmove', handleTouchMove, { passive: false });
+                scrollArea.addEventListener('touchend', handleTouchEnd); scrollArea.addEventListener('touchcancel', handleTouchEnd);
 
                 // 缩放滑块
                 let sliderDragging = false;
@@ -2003,18 +2029,33 @@
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
 
-            setZoom(level, skipTransition) {
-                level = parseFloat(level.toFixed(2));
-                if (level < CONFIG.minZoom) level = CONFIG.minZoom; else if (level > CONFIG.maxZoom) level = CONFIG.maxZoom;
-                if (Math.abs(level - appState.zoom) < 0.01) return;
-                if (skipTransition) { this.game.boardBg.classList.remove('zoom-animated'); this.game.boardCanvas.classList.remove('zoom-animated'); }
-                const oldZoom = appState.zoom, oldScrollLeft = this.game.scrollArea.scrollLeft, oldScrollTop = this.game.scrollArea.scrollTop;
+            setZoom(level, skipTransition, centerX, centerY, anchorX, anchorY) {
+                level = Math.min(CONFIG.maxZoom, Math.max(CONFIG.minZoom, parseFloat(level.toFixed(2))));
+                // 指定锚点时即使缩放不变也需更新滚动（双指平移跟随），因此不提前返回
+                if (Math.abs(level - appState.zoom) < 0.01 && anchorX === undefined) return;
+                const scrollArea = this.game.scrollArea;
+                const oldZoom = appState.zoom, oldSl = scrollArea.scrollLeft, oldSt = scrollArea.scrollTop;
+                // 缩放锚点：缩放时保持该棋盘坐标点不动（centerX/centerY 为其视口坐标，可省略）
+                let ax = anchorX, ay = anchorY;
+                if (ax === undefined && centerX !== undefined) { ax = (centerX + oldSl) / oldZoom; ay = (centerY + oldSt) / oldZoom; }
+                if (skipTransition) {
+                    const bg = this.game.boardBg, canvas = this.game.boardCanvas;
+                    bg.classList.remove('zoom-animated'); canvas.classList.remove('zoom-animated');
+                    clearTimeout(this._zoomTransitionTimer);
+                    this._zoomTransitionTimer = setTimeout(() => { bg.classList.add('zoom-animated'); canvas.classList.add('zoom-animated'); }, 120);
+                }
                 appState.zoom = level;
-                this.game.boardBg.style.transform = `scale(${appState.zoom})`; this.game.boardCanvas.style.transform = `scale(${appState.zoom})`;
-                this.game.virtualBoardContainer.style.width = `${BASE_BOARD_SIZE * appState.zoom}px`; this.game.virtualBoardContainer.style.height = `${BASE_BOARD_SIZE * appState.zoom}px`;
+                this.game.boardBg.style.transform = `scale(${level})`; this.game.boardCanvas.style.transform = `scale(${level})`;
+                this.game.virtualBoardContainer.style.width = `${BASE_BOARD_SIZE * level}px`; this.game.virtualBoardContainer.style.height = `${BASE_BOARD_SIZE * level}px`;
                 this.updateZoomSlider();
-                if (skipTransition) { requestAnimationFrame(() => { this.game.boardBg.classList.add('zoom-animated'); this.game.boardCanvas.classList.add('zoom-animated'); }); }
-                requestAnimationFrame(() => { const scaleRatio = appState.zoom / oldZoom; this.game.scrollArea.scrollLeft = oldScrollLeft * scaleRatio; this.game.scrollArea.scrollTop = oldScrollTop * scaleRatio; });
+                if (ax !== undefined && centerX !== undefined) {
+                    scrollArea.scrollLeft = ax * level - centerX;
+                    scrollArea.scrollTop = ay * level - centerY;
+                } else {
+                    const ratio = level / oldZoom;
+                    scrollArea.scrollLeft = oldSl * ratio;
+                    scrollArea.scrollTop = oldSt * ratio;
+                }
             }
 
             zoomIn() { this.game.boardBg.classList.add('zoom-animated'); this.game.boardCanvas.classList.add('zoom-animated'); this.setZoom(appState.zoom + 0.1); }
