@@ -36,6 +36,7 @@
             background: #f9f4e8;
             position: relative;
             overflow: auto;
+            touch-action: none; /* 手势由 JS 接管（单指平移、双指缩放） */
         }
         
         .chessboard-container::-webkit-scrollbar { display: none; }
@@ -48,9 +49,6 @@
             transform-origin: 0 0;
             will-change: transform;
             position: relative;
-        }
-        #boardBg.zoom-animated, #board.zoom-animated {
-            transition: transform 0.15s ease;
         }
         
         .panel-container {
@@ -181,9 +179,7 @@
             border-radius: 4px;
             font-size: 12px;
             color: #666;
-            /* z-index: 10; */
             user-select: none;
-            /* background: #fff; */
         }
 
         .zoom-btn {
@@ -421,10 +417,15 @@
             SUB_CITY: { SIZE: 7, AREA: 5 }
         });
         const BASE_BOARD_SIZE = CONFIG.size * (CONFIG.cell + 1);
+        const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+        const EDGE_MARGIN = 80; // 棋盘至少保留该宽度（px）在视口内，防止拖丢
+        // 橡皮筋：拖拽越界时按 15% 衰减跟手（极轻阻力），松手后由 simulate 的弱弹簧轻微弹回
+        const elastic = (v, min, max) => v < min ? min + (v - min) * 0.15 : (v > max ? max + (v - max) * 0.15 : v);
 
         // 运行时状态
         const appState = {
-            zoom: 1         // 缩放比例（运行时可修改）
+            zoom: 1,        // 缩放比例（运行时可修改）
+            pan: { x: 0, y: 0 }  // 棋盘左上角在视窗中的屏幕位置（自由平移，可为负/超出视窗边缘）
         };
 
         // 悬停状态管理类
@@ -563,8 +564,8 @@
             }
 
             processCellClick(x, y) {
-                // 网络对战时，检查是否轮到自己的回合
-                if (this.network.isNetworkGame && !this.network.isMyTurn) return;
+                // 网络对战时，检查是否轮到自己的回合（对手断线期间禁止行动）
+                if (this.network.isNetworkGame && (!this.network.isMyTurn || this.network.opponentGone)) return;
 
                 // 编辑资源点模式（资源点勾选且可用时才进入）
                 if (this.resourceToggle.checked && !this.resourceToggle.disabled) {
@@ -1019,12 +1020,12 @@
                 const checkDirection = (checkX, checkY, dir) => {
                     for (let j = checkX; j <= checkY; j++) {
                         let nx = 0, ny = 0;
-                    switch(dir) {
-                        case 0: nx = j; ny = y - offset; break;
-                        case 1: nx = j; ny = y + offset; break;
-                        case 2: nx = x - offset; ny = j; break;
-                        case 3: nx = x + offset; ny = j; break;
-                    }
+                        switch (dir) {
+                            case 0: nx = j; ny = y - offset; break;
+                            case 1: nx = j; ny = y + offset; break;
+                            case 2: nx = x - offset; ny = j; break;
+                            case 3: nx = x + offset; ny = j; break;
+                        }
                         if (nx < 0 || nx >= CONFIG.size || ny < 0 || ny >= CONFIG.size) continue;
                         if (this.game.state.grid[ny][nx].type === attacker) return true;
                     }
@@ -1364,8 +1365,8 @@
                             const type = this.game.state.grid[ny][nx].type;
                             if (type === 'circle') circle++; else if (type === 'cross') cross++;
                         }
-                        if (circle > cross) this.game.state.grid[y][x].type === 'mix' ? circleKill++ : circleResources++;
-                        else if (cross > circle) this.game.state.grid[y][x].type === 'mix' ? crossKill++ : crossResources++;
+                        if (circle > cross) { if (this.game.state.grid[y][x].type === 'mix') circleKill++; else circleResources++; }
+                        else if (cross > circle) { if (this.game.state.grid[y][x].type === 'mix') crossKill++; else crossResources++; }
                     }
                 }
                 const subAreaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
@@ -1415,17 +1416,23 @@
                 const baseCellSize = CONFIG.cell;
                 const gapSize = 1;
 
+                // 视口坐标 → 棋盘格子坐标（pan 由 getBoundingClientRect 实测抵消，与缩放实现解耦）
+                const toCell = (clientX, clientY) => {
+                    const rect = this.game.boardCanvas.getBoundingClientRect();
+                    const s = baseCellSize + gapSize;
+                    return {
+                        x: Math.floor((clientX - rect.left) / appState.zoom / s),
+                        y: Math.floor((clientY - rect.top) / appState.zoom / s)
+                    };
+                };
+
                 // 点击事件
                 this.clickHandler = (e) => {
                     if (!this.game.isClick) {
                         this.game.isClick = true;
                         return;
                     }
-                    const rect = this.game.boardCanvas.getBoundingClientRect();
-                    const scaledClickX = (e.clientX - rect.left) / appState.zoom;
-                    const scaledClickY = (e.clientY - rect.top) / appState.zoom;
-                    const x = Math.floor(scaledClickX / (baseCellSize + gapSize));
-                    const y = Math.floor(scaledClickY / (baseCellSize + gapSize));
+                    const { x, y } = toCell(e.clientX, e.clientY);
                     if (x >= 0 && x < CONFIG.size && y >= 0 && y < CONFIG.size) {
                         this.game.processCellClick(x, y);
                     }
@@ -1434,11 +1441,7 @@
 
                 // 鼠标移动事件（悬停高亮）
                 this.mouseMoveHandler = (e) => {
-                    const rect = this.game.boardCanvas.getBoundingClientRect();
-                    const scaledMoveX = (e.clientX - rect.left) / appState.zoom;
-                    const scaledMoveY = (e.clientY - rect.top) / appState.zoom;
-                    const x = Math.floor(scaledMoveX / (baseCellSize + gapSize));
-                    const y = Math.floor(scaledMoveY / (baseCellSize + gapSize));
+                    const { x, y } = toCell(e.clientX, e.clientY);
                     if (x >= 0 && x < CONFIG.size && y >= 0 && y < CONFIG.size) {
                         this.game.hoverState.updatePosition(x, y);
                     } else {
@@ -1486,10 +1489,6 @@
                 this.game.ctxBg.scale(dpr, dpr);
                 this.game.ctx.scale(dpr, dpr);
 
-                // 初始化虚拟容器尺寸
-                this.game.virtualBoardContainer.style.width = `${BASE_BOARD_SIZE * appState.zoom}px`;
-                this.game.virtualBoardContainer.style.height = `${BASE_BOARD_SIZE * appState.zoom}px`;
-
                 // 绘制背景层（棋盘网格、城池、资源点）
                 this.drawBoardBg();
             }
@@ -1525,6 +1524,11 @@
                     ctxBg.lineTo(xPos, boardLogicalSize);
                     ctxBg.stroke();
                 }
+                
+                // 最外圈网格线加粗，作为棋盘边框
+                ctxBg.strokeStyle = '#b8a888';
+                ctxBg.lineWidth = 1;
+                ctxBg.strokeRect(1.5, 1.5, boardLogicalSize - 3, boardLogicalSize - 3);
                 
                 // 绘制城池
                 this.drawMainCityBg();
@@ -1571,13 +1575,7 @@
                 // 清除单元格区域
                 ctx.clearRect(cellX, cellY, baseCellSize, baseCellSize);
 
-                // 棋子样式（只绘制圆圈、叉、混合棋子，资源点在背景层绘制）
-                switch(cellState.type) {
-                    case 'circle': this.drawCircle(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                    case 'cross': this.drawCross(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                    case 'mix': this.drawMix(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                }
-
+                // 高亮绘制在棋子之下（作为底色），保证棋子清晰可见
                 // 选中状态高亮
                 if (hasSelected && this.game.state.selected?.x === x && this.game.state.selected?.y === y) {
                     ctx.fillStyle = 'rgba(128, 200, 255, 0.8)';
@@ -1599,6 +1597,13 @@
                         ctx.fillStyle = 'rgba(255, 204, 199, 0.8)';
                         ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
                     }
+                }
+
+                // 棋子样式（只绘制圆圈、叉、混合棋子，资源点在背景层绘制）
+                switch(cellState.type) {
+                    case 'circle': this.drawCircle(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
+                    case 'cross': this.drawCross(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
+                    case 'mix': this.drawMix(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
                 }
             }
 
@@ -1940,27 +1945,40 @@
             constructor(game) {
                 this.game = game;
 
-                // 拖拽滚动
-                let isDragging = false, startX, startY, scrollLeft, scrollTop, dragStartX, dragStartY;
+                // 拖拽平移（自由平移：棋盘边缘可进入视窗内部）
+                let isDragging = false, startX, startY, startPanX, startPanY, dragStartX, dragStartY;
+                let velX = 0, velY = 0, lastX = 0, lastY = 0, lastT = 0; // 松手速度（px/ms），用于惯性滑行
                 const DRAG_THRESHOLD = 2;
                 const scrollArea = this.game.scrollArea;
                 const handleMouseDown = (e) => {
+                    this._settleSeq = (this._settleSeq || 0) + 1; // 取消进行中的仿真
                     isDragging = true; this.game.isClick = true; dragStartX = e.clientX; dragStartY = e.clientY;
                     startX = e.pageX - scrollArea.getBoundingClientRect().left;
                     startY = e.pageY - scrollArea.getBoundingClientRect().top;
-                    scrollLeft = scrollArea.scrollLeft; scrollTop = scrollArea.scrollTop;
+                    startPanX = appState.pan.x; startPanY = appState.pan.y;
                     scrollArea.style.cursor = 'grabbing'; document.body.style.userSelect = 'none';
                 };
                 const handleMouseMove = (e) => {
                     if (!isDragging) return;
-                    const distance = Math.sqrt(Math.pow(e.clientX - dragStartX, 2) + Math.pow(e.clientY - dragStartY, 2));
-                    if (distance > DRAG_THRESHOLD) this.game.isClick = false;
+                    if (Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY) > DRAG_THRESHOLD) this.game.isClick = false;
                     const x = e.pageX - scrollArea.getBoundingClientRect().left, y = e.pageY - scrollArea.getBoundingClientRect().top;
-                    const dragRatio = 1 / appState.zoom;
-                    scrollArea.scrollLeft = scrollLeft - (x - startX) * dragRatio;
-                    scrollArea.scrollTop = scrollTop - (y - startY) * dragRatio;
+                    // 记录速度（惯性用）
+                    const now = performance.now();
+                    if (lastT && now - lastT < 100) { velX = (x - lastX) / (now - lastT); velY = (y - lastY) / (now - lastT); }
+                    lastX = x; lastY = y; lastT = now;
+                    // 1:1 跟手拖动 + 极轻橡皮筋（越界阻力很小）
+                    const r = this.panRange(appState.zoom);
+                    appState.pan.x = elastic(startPanX + (x - startX), r.x[0], r.x[1]);
+                    appState.pan.y = elastic(startPanY + (y - startY), r.y[0], r.y[1]);
+                    this.render();
                 };
-                const handleMouseUp = () => { if (isDragging) { isDragging = false; scrollArea.style.cursor = 'default'; document.body.style.userSelect = ''; } };
+                const handleMouseUp = () => {
+                    if (isDragging) {
+                        isDragging = false; scrollArea.style.cursor = 'default'; document.body.style.userSelect = '';
+                        this.simulate(velX, velY);
+                        velX = velY = 0;
+                    }
+                };
                 scrollArea.addEventListener('mousedown', handleMouseDown);
                 document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); document.addEventListener('mouseleave', handleMouseUp);
 
@@ -1969,12 +1987,12 @@
                     e.preventDefault();
                     const rect = scrollArea.getBoundingClientRect();
                     const dy = Math.max(-100, Math.min(100, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
-                    const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, appState.zoom * Math.pow(1.1, -dy / 100)));
+                    const newZoom = clamp(appState.zoom * Math.pow(1.1, -dy / 100), CONFIG.minZoom, CONFIG.maxZoom);
                     this.setZoom(newZoom, true, e.clientX - rect.left, e.clientY - rect.top);
                 }, { passive: false });
 
-                // 双指触摸缩放（中心跟随手指，如同查看图片）
-                let pinch = null;
+                // 触摸手势：单指平移，双指缩放（中心跟随手指）
+                let pinch = null, touchPan = null;
                 const gesture = (e) => {
                     const rect = scrollArea.getBoundingClientRect(), [t1, t2] = e.touches;
                     return {
@@ -1984,82 +2002,190 @@
                     };
                 };
                 const handleTouchStart = (e) => {
-                    if (e.touches.length !== 2) return;
-                    e.preventDefault();
-                    const g = gesture(e);
-                    pinch = { zoom: appState.zoom, dist: g.dist, anchor: { x: (g.x + scrollArea.scrollLeft) / appState.zoom, y: (g.y + scrollArea.scrollTop) / appState.zoom } };
+                    this._settleSeq = (this._settleSeq || 0) + 1; // 取消进行中的仿真
+                    this.game.isClick = true; // 防御：个别浏览器 click 与 isClick 复位时序错位
+                    // 无需 preventDefault：CSS touch-action:none 已阻止滚动/缩放/合成 mouse 事件，且不影响原生 click 合成
+                    if (e.touches.length === 1) {
+                        pinch = null; // 单指开始时清除双指状态，避免脏基准
+                        const t = e.touches[0];
+                        touchPan = { sx: t.clientX, sy: t.clientY, panX: appState.pan.x, panY: appState.pan.y, tx: t.clientX, ty: t.clientY, tt: performance.now() };
+                    } else if (e.touches.length === 2) {
+                        touchPan = null; // 双指开始时清除单指状态，避免脏基准
+                        const g = gesture(e);
+                        pinch = { zoom: appState.zoom, dist: g.dist };
+                    }
                 };
                 const handleTouchMove = (e) => {
-                    if (!pinch || e.touches.length !== 2) return;
-                    e.preventDefault();
-                    const g = gesture(e);
-                    const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, pinch.zoom * (g.dist / pinch.dist)));
-                    this.setZoom(newZoom, true, g.x, g.y, pinch.anchor.x, pinch.anchor.y);
+                    if (touchPan && e.touches.length === 1) {
+                        const t = e.touches[0];
+                        const now = performance.now();
+                        if (now - touchPan.tt < 100) { velX = (t.clientX - touchPan.tx) / (now - touchPan.tt); velY = (t.clientY - touchPan.ty) / (now - touchPan.tt); }
+                        touchPan.tx = t.clientX; touchPan.ty = t.clientY; touchPan.tt = now;
+                        // 1:1 跟手拖动 + 极轻橡皮筋（越界阻力很小）
+                        const r = this.panRange(appState.zoom);
+                        appState.pan.x = elastic(touchPan.panX + (t.clientX - touchPan.sx), r.x[0], r.x[1]);
+                        appState.pan.y = elastic(touchPan.panY + (t.clientY - touchPan.sy), r.y[0], r.y[1]);
+                        this.render();
+                    } else if (pinch && e.touches.length === 2) {
+                        const g = gesture(e);
+                        this.setZoom(clamp(pinch.zoom * (g.dist / pinch.dist), CONFIG.minZoom, CONFIG.maxZoom), true, g.x, g.y);
+                    }
                 };
-                const handleTouchEnd = () => { pinch = null; };
-                scrollArea.addEventListener('touchstart', handleTouchStart, { passive: false });
-                scrollArea.addEventListener('touchmove', handleTouchMove, { passive: false });
+                const handleTouchEnd = () => {
+                    const panEnded = !pinch && touchPan; // 仅单指平移结束时触发仿真
+                    pinch = null; touchPan = null;
+                    if (panEnded) this.simulate(velX, velY);
+                    velX = velY = 0;
+                };
+                scrollArea.addEventListener('touchstart', handleTouchStart);
+                scrollArea.addEventListener('touchmove', handleTouchMove);
                 scrollArea.addEventListener('touchend', handleTouchEnd); scrollArea.addEventListener('touchcancel', handleTouchEnd);
 
-                // 缩放滑块
+                // 缩放滑块（以视口中心为缩放锚点）
                 let sliderDragging = false;
                 const zoomSlider = this.game.zoomSlider;
                 const zoomThumb = this.game.zoomThumb;
-                const getZoomFromPos = (clientX) => { const rect = zoomSlider.getBoundingClientRect(); let percent = (clientX - rect.left) / rect.width; percent = Math.max(0, Math.min(1, percent)); return CONFIG.minZoom + (CONFIG.maxZoom - CONFIG.minZoom) * percent; };
+                const getZoomFromPos = (clientX) => { const rect = zoomSlider.getBoundingClientRect(); return CONFIG.minZoom + (CONFIG.maxZoom - CONFIG.minZoom) * clamp((clientX - rect.left) / rect.width, 0, 1); };
+                const zoomAtCenter = (level) => this.setZoom(level, true, scrollArea.clientWidth / 2, scrollArea.clientHeight / 2);
                 const handleThumbDown = (e) => { sliderDragging = true; zoomThumb.style.cursor = 'grabbing'; document.body.style.userSelect = 'none'; e.preventDefault(); };
-                const handleSliderClick = (e) => { if (e.target !== zoomThumb) this.setZoom(getZoomFromPos(e.clientX), true); };
-                const handleSliderMouseMove = (e) => { if (sliderDragging) this.setZoom(getZoomFromPos(e.clientX), true); };
+                const handleSliderClick = (e) => { if (e.target !== zoomThumb) zoomAtCenter(getZoomFromPos(e.clientX)); };
+                const handleSliderMouseMove = (e) => { if (sliderDragging) zoomAtCenter(getZoomFromPos(e.clientX)); };
                 const handleSliderMouseUp = () => { if (sliderDragging) { sliderDragging = false; zoomThumb.style.cursor = 'grab'; document.body.style.userSelect = ''; } };
                 zoomThumb.addEventListener('mousedown', handleThumbDown);
                 zoomSlider.addEventListener('mousedown', handleSliderClick);
                 document.addEventListener('mousemove', handleSliderMouseMove); document.addEventListener('mouseup', handleSliderMouseUp); document.addEventListener('touchend', handleSliderMouseUp);
                 zoomThumb.addEventListener('touchstart', (e) => { sliderDragging = true; e.preventDefault(); });
-                document.addEventListener('touchmove', (e) => { if (!sliderDragging) return; e.preventDefault(); this.setZoom(getZoomFromPos(e.touches[0].clientX), true); }, { passive: false });
+                document.addEventListener('touchmove', (e) => { if (!sliderDragging) return; e.preventDefault(); zoomAtCenter(getZoomFromPos(e.touches[0].clientX)); }, { passive: false });
+
+                // 窗口尺寸变化：刷新裁剪区域，越界的 pan 由仿真平滑弹回
+                window.addEventListener('resize', () => { this.render(); this.simulate(0, 0); });
             }
 
             reset() {
-                this.setZoom(1);
-                this.updateZoomSlider();
+                this._settleSeq = (this._settleSeq || 0) + 1; // 中断进行中的仿真
+                this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中断缩放动画
+                // 默认位置：棋盘居中（棋盘可大于视口，四周均可能自然越界）
+                const vw = this.game.scrollArea.clientWidth, vh = this.game.scrollArea.clientHeight;
+                appState.pan.x = (vw - BASE_BOARD_SIZE) / 2;
+                appState.pan.y = (vh - BASE_BOARD_SIZE) / 2;
+                this.applyZoom(1); // 重置缩放并渲染（applyZoom 内部已 render）
                 this.game.randomMapBtn.disabled = false;
                 this.game.randomCitiesToggle.disabled = false;
                 this.game.resourceToggle.disabled = false;
-                this.game.scrollArea.scrollLeft = this.game.scrollArea.scrollTop = 0;
                 this.game.winnerText.textContent = '- 未结算 -';
             }
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
 
-            setZoom(level, skipTransition, centerX, centerY, anchorX, anchorY) {
-                level = Math.min(CONFIG.maxZoom, Math.max(CONFIG.minZoom, parseFloat(level.toFixed(2))));
-                // 指定锚点时即使缩放不变也需更新滚动（双指平移跟随），因此不提前返回
-                if (Math.abs(level - appState.zoom) < 0.01 && anchorX === undefined) return;
-                const scrollArea = this.game.scrollArea;
-                const oldZoom = appState.zoom, oldSl = scrollArea.scrollLeft, oldSt = scrollArea.scrollTop;
-                // 缩放锚点：缩放时保持该棋盘坐标点不动（centerX/centerY 为其视口坐标，可省略）
-                let ax = anchorX, ay = anchorY;
-                if (ax === undefined && centerX !== undefined) { ax = (centerX + oldSl) / oldZoom; ay = (centerY + oldSt) / oldZoom; }
-                if (skipTransition) {
-                    const bg = this.game.boardBg, canvas = this.game.boardCanvas;
-                    bg.classList.remove('zoom-animated'); canvas.classList.remove('zoom-animated');
-                    clearTimeout(this._zoomTransitionTimer);
-                    this._zoomTransitionTimer = setTimeout(() => { bg.classList.add('zoom-animated'); canvas.classList.add('zoom-animated'); }, 120);
+            setZoom(level, skipTransition, centerX, centerY) {
+                level = clamp(parseFloat(level.toFixed(2)), CONFIG.minZoom, CONFIG.maxZoom);
+                if (Math.abs(level - appState.zoom) < 0.01) return;
+                if (!skipTransition && centerX !== undefined) { this.animateZoom(level, centerX, centerY); return; }
+                this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中止进行中的缩放动画
+                const pan = appState.pan, z0 = appState.zoom;
+                if (centerX !== undefined) {
+                    // 缩放锚点：保持视口坐标 (centerX, centerY) 处的棋盘点不动
+                    pan.x = centerX - (centerX - pan.x) * level / z0;
+                    pan.y = centerY - (centerY - pan.y) * level / z0;
                 }
-                appState.zoom = level;
-                this.game.boardBg.style.transform = `scale(${level})`; this.game.boardCanvas.style.transform = `scale(${level})`;
-                this.game.virtualBoardContainer.style.width = `${BASE_BOARD_SIZE * level}px`; this.game.virtualBoardContainer.style.height = `${BASE_BOARD_SIZE * level}px`;
-                this.updateZoomSlider();
-                if (ax !== undefined && centerX !== undefined) {
-                    scrollArea.scrollLeft = ax * level - centerX;
-                    scrollArea.scrollTop = ay * level - centerY;
-                } else {
-                    const ratio = level / oldZoom;
-                    scrollArea.scrollLeft = oldSl * ratio;
-                    scrollArea.scrollTop = oldSt * ratio;
-                }
+                // 缩放后直接回正到边界内（而非橡皮筋），避免锚点持续漂移
+                const r = this.panRange(level);
+                pan.x = clamp(pan.x, r.x[0], r.x[1]);
+                pan.y = clamp(pan.y, r.y[0], r.y[1]);
+                this.applyZoom(level);
             }
 
-            zoomIn() { this.game.boardBg.classList.add('zoom-animated'); this.game.boardCanvas.classList.add('zoom-animated'); this.setZoom(appState.zoom + 0.1); }
-            zoomOut() { this.game.boardBg.classList.add('zoom-animated'); this.game.boardCanvas.classList.add('zoom-animated'); this.setZoom(appState.zoom - 0.1); }
+            // 平滑缩放：150ms 内逐帧同步缩放与平移，锚点全程不动，避免跳变
+            animateZoom(target, cx, cy) {
+                const pan = appState.pan, z0 = appState.zoom;
+                const x0 = pan.x, y0 = pan.y;
+                const bx = (cx - x0) / z0, by = (cy - y0) / z0;
+                const dur = 150, t0 = performance.now();
+                const id = this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1;
+                const step = (now) => {
+                    if (this._zoomAnimSeq !== id) return; // 已被新的缩放取代
+                    const t = Math.min(1, (now - t0) / dur);
+                    const z = z0 + (target - z0) * (1 - Math.pow(1 - t, 3)); // ease-out
+                    pan.x = cx - bx * z;
+                    pan.y = cy - by * z;
+                    if (t === 1) { // 结束帧回正到边界内
+                        const r = this.panRange(target);
+                        pan.x = clamp(pan.x, r.x[0], r.x[1]);
+                        pan.y = clamp(pan.y, r.y[0], r.y[1]);
+                    }
+                    this.applyZoom(z);
+                    if (t < 1) requestAnimationFrame(step);
+                };
+                requestAnimationFrame(step);
+            }
+
+            // 允许的 pan 范围：棋盘四周至少保留 EDGE_MARGIN 在视口内（防拖丢）
+            panRange(z) {
+                const vw = this.game.scrollArea.clientWidth, vh = this.game.scrollArea.clientHeight;
+                const bw = BASE_BOARD_SIZE * z, bh = BASE_BOARD_SIZE * z;
+                const range = (dim, b) => {
+                    let min = EDGE_MARGIN - b, max = dim - EDGE_MARGIN;
+                    if (min > max) { const mid = (min + max) / 2; min = max = mid; } // 棋盘比视口小很多时取中点
+                    return [min, max];
+                };
+                return { x: range(vw, bw), y: range(vh, bh) };
+            }
+
+            // 松手后的仿真：惯性滑行 + 摩擦 + 微小橡皮筋弹力（一个方法完成，越界自动拉回）
+            simulate(vx, vy) {
+                const r = this.panRange(appState.zoom);
+                const id = this._settleSeq = (this._settleSeq || 0) + 1;
+                const K = 5.0, K_BOUND = 2.4, SPRING = 0.2; // 界内摩擦 / 界外阻尼 / 回弹力
+                let lastT = performance.now();
+                const step = (now) => {
+                    if (this._settleSeq !== id) return; // 已被新手势打断
+                    const dt = Math.min(now - lastT, 50) / 1000; // 秒，上限 50ms 防跳帧
+                    lastT = now;
+                    const ox = appState.pan.x > r.x[1] ? appState.pan.x - r.x[1] : appState.pan.x < r.x[0] ? appState.pan.x - r.x[0] : 0;
+                    const oy = appState.pan.y > r.y[1] ? appState.pan.y - r.y[1] : appState.pan.y < r.y[0] ? appState.pan.y - r.y[0] : 0;
+                    const over = Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01; // 是否越界
+                    const fade = Math.exp(-(over ? K_BOUND : K) * dt); // 界外阻尼大，抑制振荡
+                    vx = vx * fade - SPRING * ox * dt;
+                    vy = vy * fade - SPRING * oy * dt;
+                    appState.pan.x += vx * dt * 1000;
+                    appState.pan.y += vy * dt * 1000;
+                    this.render();
+                    // 停稳：速度极小且基本回到界内
+                    if (Math.hypot(vx, vy) < 0.01 && Math.abs(ox) < 0.5 && Math.abs(oy) < 0.5) {
+                        appState.pan.x = clamp(appState.pan.x, r.x[0], r.x[1]);
+                        appState.pan.y = clamp(appState.pan.y, r.y[0], r.y[1]);
+                        this.render();
+                        return;
+                    }
+                    requestAnimationFrame(step);
+                };
+                requestAnimationFrame(step);
+            }
+
+            applyZoom(z) {
+                appState.zoom = z;
+                this.updateZoomSlider();
+                this.render();
+            }
+
+            // 按当前 zoom+pan 渲染：pan 完全自由，棋盘任意位置均可显示（超出视口部分被裁剪）
+            render() {
+                const scrollArea = this.game.scrollArea;
+                const z = appState.zoom, pan = appState.pan;
+                // 虚拟容器恒等于视口大小（仅尺寸变化时写入，避免动画期间反复设置 style）
+                const vw = scrollArea.clientWidth, vh = scrollArea.clientHeight;
+                if (this._vw !== vw || this._vh !== vh) {
+                    this._vw = vw; this._vh = vh;
+                    this.game.virtualBoardContainer.style.width = `${vw}px`;
+                    this.game.virtualBoardContainer.style.height = `${vh}px`;
+                }
+                const t = `translate(${pan.x}px, ${pan.y}px) scale(${z})`;
+                this.game.boardBg.style.transform = t;
+                this.game.boardCanvas.style.transform = t;
+            }
+
+            zoomIn() { const a = this.game.scrollArea; this.setZoom(appState.zoom + 0.1, false, a.clientWidth / 2, a.clientHeight / 2); }
+            zoomOut() { const a = this.game.scrollArea; this.setZoom(appState.zoom - 0.1, false, a.clientWidth / 2, a.clientHeight / 2); }
         }
 
         // 文件管理类（导出/导入）
@@ -2094,7 +2220,7 @@
                             if (!this.validateImportData(importData)) { alert("导入失败：文件格式错误或数据不完整！"); return; }
                             this.restoreGameState(importData);
                             this.game.renderer.initBoard(); this.game.renderer.drawBoardBg(); this.game.renderer.drawBoard();
-                            this.game.viewport.updateZoomSlider(); this.game.recorder.updateDisplay(); alert("棋局导入成功！");
+                            this.game.recorder.updateDisplay(); alert("棋局导入成功！");
                         } catch (error) { console.error("导入解析失败：", error); alert(`导入失败：${error.message}`); }
                     };
                     reader.readAsText(file);
@@ -2109,7 +2235,9 @@
                 this.game.replayHistory(this.game.state.history.length - 1);
                 this.game.renderer.clearFlashQueue();
                 this.game.recorder.renderFullHistory();
-                appState.zoom = 1;
+                // 缩放复位走 viewport 统一入口（同步 transform 与滑块），以视口中心为锚点
+                const a = this.game.scrollArea;
+                this.game.viewport.setZoom(1, true, a.clientWidth / 2, a.clientHeight / 2);
                 if (data.meta && data.meta.buttons) {
                     if (data.meta.buttons.randomCitiesToggle !== undefined) this.game.randomCitiesToggle.checked = data.meta.buttons.randomCitiesToggle;
                     if (data.meta.buttons.resourceToggle !== undefined) this.game.resourceToggle.checked = data.meta.buttons.resourceToggle;
@@ -2126,8 +2254,13 @@
                 this.playerRole = null;
                 this.isMyTurn = false;
                 this.serverIp = null;
+                this.serverPort = null;
                 this.roomState = null;
                 this.isHost = false;
+                this.roomId = null;
+                this.opponentGone = false;
+                this._intentionalClose = false;
+                this._reconnectTimer = null;
             }
 
             updateRoleDisplay() {
@@ -2155,38 +2288,81 @@
                 }
             }
 
+            // 重置房间状态与身份显示
+            resetRoom() {
+                this.roomState = null;
+                this.isHost = false;
+                this.isNetworkGame = false;
+                this.isMyTurn = false;
+                this.playerRole = null;
+                this.roomId = null;
+                this.opponentGone = false;
+                this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false;
+                this.game.playerRole.textContent = '未分配';
+                this.game.gameStatus.textContent = '准备中';
+                this.updateRoomButtonsState();
+            }
+
             connectToServer() {
                 if (this.ws) { alert('已经连接到服务器'); return; }
+                const input = prompt('请输入服务器IP及端口:', 'localhost:8080');
+                if (!input) return;
+                let ipPort = input.trim();
+                let serverIp = ipPort, port = 8080;
+                if (ipPort.includes(':')) {
+                    const parts = ipPort.split(':');
+                    serverIp = parts[0];
+                    port = parseInt(parts[1], 10) || 8080;
+                }
+                this.openSocket(serverIp, port);
+            }
+
+            openSocket(serverIp, port, isReconnect = false) {
+                this.serverIp = serverIp;
+                this.serverPort = port;
+                this._intentionalClose = false;
+                clearTimeout(this._reconnectTimer);
+                const statusEl = this.game.connectionStatus;
                 try {
-                    const input = prompt('请输入服务器IP及端口:', 'localhost:8080');
-                    if (!input) return;
-                    let ipPort = input.trim();
-                    let serverIp = ipPort, port = 8080;
-                    if (ipPort.includes(':')) {
-                        const parts = ipPort.split(':');
-                        serverIp = parts[0];
-                        port = parseInt(parts[1], 10) || 8080;
-                    }
-                    this.serverIp = serverIp;
-                    const statusEl = this.game.connectionStatus;
                     this.ws = new WebSocket(`ws://${serverIp}:${port}`);
-                    this.ws.onopen = () => { statusEl.textContent = `${serverIp}:${port}`; statusEl.style.color = '#4CAF50'; };
+                    this.ws.onopen = () => {
+                        statusEl.textContent = `${serverIp}:${port}${isReconnect ? '（已重连）' : ''}`;
+                        statusEl.style.color = '#4CAF50';
+                        this.game.gameStatus.textContent = '已连接';
+                        // 断线重连后自动恢复房间
+                        if (this.roomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            this.ws.send(JSON.stringify({ type: 'join_room', roomId: this.roomId }));
+                        }
+                    };
                     this.ws.onmessage = (event) => { try { this.handleWebSocketMessage(JSON.parse(event.data)); } catch (error) { console.error('消息解析错误:', error); } };
-                    this.ws.onclose = () => { statusEl.textContent = '未连接'; statusEl.style.color = '#f44336'; this.ws = null; this.roomState = null; this.isHost = false; this.isNetworkGame = false; this.isMyTurn = false; this.playerRole = null; this.updateRoomButtonsState(); this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false; this.game.playerRole.textContent = '未分配'; this.game.gameStatus.textContent = '准备中'; };
-                    this.ws.onerror = (error) => { console.error('WebSocket错误:', error); statusEl.textContent = '连接错误'; statusEl.style.color = '#f44336'; };
+                    this.ws.onclose = () => {
+                        this.ws = null;
+                        if (this._intentionalClose) {
+                            statusEl.textContent = '未连接'; statusEl.style.color = '#f44336';
+                            this.resetRoom();
+                        } else if (this.serverIp) {
+                            // 非主动断开 → 3 秒后自动重连
+                            statusEl.textContent = '连接断开，3秒后重连...'; statusEl.style.color = '#f44336';
+                            this._reconnectTimer = setTimeout(() => {
+                                if (!this._intentionalClose && !this.ws && this.serverIp) {
+                                    this.openSocket(this.serverIp, this.serverPort, true);
+                                }
+                            }, 3000);
+                        }
+                    };
+                    this.ws.onerror = (error) => { console.error('WebSocket错误:', error); };
                 } catch (error) { console.error('WebSocket连接失败:', error); this.game.connectionStatus.textContent = '连接失败'; this.game.connectionStatus.style.color = '#f44336'; }
             }
 
             disconnectServer() {
-                if (this.ws) {
-                    this.ws.close(); this.ws = null;
-                    this.game.connectionStatus.textContent = '未连接'; this.game.connectionStatus.style.color = '#f44336';
-                    this.game.playerRole.textContent = '未分配'; this.game.gameStatus.textContent = '准备中';
-                    this.isNetworkGame = false; this.playerRole = null; this.isMyTurn = false; this.serverIp = null;
-                    this.roomState = null; this.isHost = false;
-                    this.updateRoomButtonsState();
-                    alert('已断开服务器连接');
-                } else { alert('未连接到服务器'); }
+                this._intentionalClose = true;
+                clearTimeout(this._reconnectTimer);
+                if (this.ws) { this.ws.close(); this.ws = null; }
+                else if (!this.serverIp) { alert('未连接到服务器'); return; }
+                this.resetRoom();
+                this.game.connectionStatus.textContent = '未连接'; this.game.connectionStatus.style.color = '#f44336';
+                this.serverIp = null; this.serverPort = null;
+                alert('已断开服务器连接');
             }
 
             createRoom() {
@@ -2221,30 +2397,14 @@
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({ type: 'close_room' }));
                 }
-                this.roomState = null;
-                this.isHost = false;
-                this.isNetworkGame = false;
-                this.isMyTurn = false;
-                this.playerRole = null;
-                this.updateRoomButtonsState();
-                this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false;
-                this.game.gameStatus.textContent = '准备中';
-                this.game.playerRole.textContent = '未分配';
+                this.resetRoom();
             }
 
             leaveRoom() {
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({ type: 'leave_room' }));
                 }
-                this.roomState = null;
-                this.isHost = false;
-                this.isNetworkGame = false;
-                this.isMyTurn = false;
-                this.playerRole = null;
-                this.updateRoomButtonsState();
-                this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false;
-                this.game.gameStatus.textContent = '准备中';
-                this.game.playerRole.textContent = '未分配';
+                this.resetRoom();
             }
 
             sendGameAction(action) { if (this.ws && this.ws.readyState === WebSocket.OPEN) { this.ws.send(JSON.stringify({ type: 'game_action', action: action })); } }
@@ -2254,6 +2414,7 @@
                     case 'room_created':
                         this.roomState = 'creator';
                         this.isHost = true;
+                        this.roomId = data.roomId;
                         this.updateRoomButtonsState();
                         this.game.roomIdInput.value = data.roomId; this.game.roomIdInput.disabled = true; this.game.gameStatus.textContent = '等待对手加入';
                         this.game.playerRole.textContent = '房主（等待对手）';
@@ -2262,18 +2423,31 @@
                     case 'room_joined':
                         this.roomState = data.isHost ? 'creator' : 'joiner';
                         this.isHost = data.isHost;
+                        this.roomId = data.roomId;
+                        if (data.role) {
+                            // 断线重连已恢复原角色，直接显示身份
+                            this.playerRole = data.role; this.isNetworkGame = true; this.updateRoleDisplay();
+                        }
                         this.updateRoomButtonsState();
                         this.game.gameStatus.textContent = '游戏准备中';
-                        this.game.playerRole.textContent = this.isHost ? '房主（重新加入）' : '客人（等待同步）';
+                        if (!data.role) {
+                            // 初次加入（角色待分配/同步）
+                            this.game.playerRole.textContent = this.isHost ? '房主（重新加入）' : '客人（等待同步）';
+                        }
                         break;
                     case 'player_joined':
                         this.game.gameStatus.textContent = '游戏准备中'; alert('对手已加入');
                         break;
-                    case 'game_start': this.handleGameStart(data); break;
-                    case 'game_continue':
-                        alert('游戏继续');
-                        if (data.role) { this.playerRole = data.role; this.updateRoleDisplay(); }
+                    case 'opponent_disconnected':
+                        this.opponentGone = true;
+                        this.game.gameStatus.textContent = '对手已断线，等待重连...';
                         break;
+                    case 'player_rejoined':
+                        this.opponentGone = false;
+                        this.game.gameStatus.textContent = '对手已重连';
+                        alert('对手已重连');
+                        break;
+                    case 'game_start': this.handleGameStart(data); break;
                     case 'game_action': this.handleGameAction(data); break;
                     case 'sync_request':
                         if (this.ws && this.ws.readyState === WebSocket.OPEN) { this.ws.send(JSON.stringify({ type: 'sync_response', history: this.game.state.history, isMyTurn: !this.isMyTurn })); }
@@ -2281,17 +2455,17 @@
                         break;
                     case 'sync_state': this.handleSyncState(data); break;
                     case 'player_left':
-                        alert('对手离开了游戏'); this.game.gameStatus.textContent = '对手离开';
-                        this.roomState = null;
-                        this.isHost = false;
-                        this.isNetworkGame = false;
-                        this.isMyTurn = false;
-                        this.playerRole = null;
-                        this.game.playerRole.textContent = '未分配';
-                        this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false;
-                        this.updateRoomButtonsState();
+                        alert(data.message || '对手离开了游戏');
+                        this.resetRoom();
+                        this.game.gameStatus.textContent = '对手离开';
                         break;
                     case 'error':
+                        if (data.message === '房间不存在') {
+                            // 房间已过期（断线重连超时），停止恢复房间
+                            this.resetRoom();
+                            this.game.gameStatus.textContent = '房间已失效';
+                            break;
+                        }
                         alert('错误: ' + data.message);
                         break;
                     default: break;
@@ -2309,8 +2483,7 @@
             handleRequestReply(msg, replyOpt, onAgree, extraReplyFields = {}) {
                 if (confirm(msg)) {
                     this.sendGameAction({ opt: replyOpt, reply: true, ...extraReplyFields });
-                    onAgree(); {
-                    }
+                    onAgree();
                 } else {
                     this.sendGameAction({ opt: replyOpt, reply: false });
                 }
