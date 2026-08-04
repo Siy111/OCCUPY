@@ -344,7 +344,7 @@
                     <div class="btn-group">
                         <button onclick="game.resetGame()">重新开局</button>
                         <button onclick="game.undoMove()" id="undoBtn" disabled>悔棋</button>
-                        <button onclick="game.actionProcessor.calculateEndgame()">结算胜负</button>
+                        <button onclick="game.calculateMove()">结算胜负</button>
                     </div>
                     <button class="random-map-btn" id="randomMapBtn" onclick="game.actionProcessor.createRandomCities()">随机地图</button>
                     <div class="btn-group resource-toggle-group">
@@ -603,9 +603,7 @@
                     }
 
                     // 落子
-                    else if (this.state.selected && this.judge.canPlace(x, y)
-                        && this.judge.isInRange(x, y, this.state.selected.x, this.state.selected.y, CONFIG.RANGE.PLACE)
-                        && this.judge.isPathClear(x, y)) {
+                    else if (this.judge.canPlaceTo(x, y)) {
                         this.actionProcessor.processPlace(x, y);
                         this.sendLastAction(false);
                         this.recorder.updateDisplay(true);
@@ -629,10 +627,7 @@
                     }
 
                     // 吃子
-                    else if (this.judge.isEnemy(x, y)
-                        && this.state.selected
-                        && this.judge.isInRange(x, y, this.state.selected.x, this.state.selected.y, CONFIG.RANGE.EAT)
-                        && this.judge.hasAdvantage()) {
+                    else if (this.judge.canEatAt(x, y)) {
                         this.actionProcessor.processEat(x, y);
                         this.sendLastAction(false);
                         this.recorder.updateDisplay(true);
@@ -727,6 +722,15 @@
                 }
             }
 
+            calculateMove() {
+                if (this.network.isNetworkGame) {
+                    this.network.sendGameAction({ opt: 'calculate' });
+                    alert('等待对方同意结算...');
+                } else {
+                    this.actionProcessor.calculateEndgame();
+                }
+            }
+
             replayHistory(stepCount) {
                 this.state.grid = Array.from({ length: CONFIG.size }, () => Array.from({ length: CONFIG.size }, () => ({ type: 'empty' })));
                 this.state.mainCities = [];
@@ -770,67 +774,62 @@
 
         // 规则判定类
         class Judge {
+            // 八个移动方向（BFS 围死判定用）
+            static DIRS = [[-1, 0], [0, 1], [1, 0], [0, -1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+
             constructor(game) {
                 this.game = game;
             }
 
-            // 城池判定
+            // 城池偏移量（统一计算，避免魔法数字重复）
+            get mainCityInner() { return Math.floor(CONFIG.MAIN_CITY.INNER / 2); }
+            get mainCityOuter() { return Math.floor(CONFIG.MAIN_CITY.OUTER / 2); }
+            get subCityArea()   { return Math.floor(CONFIG.SUB_CITY.AREA / 2); }
+
+            // 点是否在城市 offset 正方形范围内
+            isInCityRange(x, y, city, offset) {
+                return x >= city.x - offset && x <= city.x + offset &&
+                       y >= city.y - offset && y <= city.y + offset;
+            }
+
+            // 主城内圈判定（不可落子区）
             isInnerMainCity(x, y) {
-                const innerOffset = Math.floor(CONFIG.MAIN_CITY.INNER / 2);
-                return this.game.state.mainCities.some(city => 
-                    x >= city.x - innerOffset && x <= city.x + innerOffset && 
-                    y >= city.y - innerOffset && y <= city.y + innerOffset
-                );
+                return this.game.state.mainCities.some(city => this.isInCityRange(x, y, city, this.mainCityInner));
             }
 
+            // 副城区域判定
             isSubCity(x, y) {
-                const outerOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
-                return this.game.state.subCities.some(city => 
-                    x >= city.x - outerOffset && x <= city.x + outerOffset && 
-                    y >= city.y - outerOffset && y <= city.y + outerOffset
-                );
+                return this.game.state.subCities.some(city => this.isInCityRange(x, y, city, this.subCityArea));
             }
 
-            isInOwnPowerArea(x, y, player) {
-                const currentPlayer = player || this.game.getCurrentPlayer();
-                // 主城判定
-                const checkMainCity = (city) => {
+            // 己方势力范围（己方主城 + 己方占领的副城）
+            isInOwnPowerArea(x, y) {
+                const currentPlayer = this.game.getCurrentPlayer();
+                const { mainCities, subCities } = this.game.state;
+                const ownMain = mainCities.some(city => {
                     if (city.owner !== currentPlayer) return false;
-                    const innerOffset = Math.floor(CONFIG.MAIN_CITY.INNER / 2);
-                    const outerOffset = Math.floor(CONFIG.MAIN_CITY.OUTER / 2);
-                    return !city.lost
-                        ? (x >= city.x - outerOffset && x <= city.x + outerOffset && y >= city.y - outerOffset && y <= city.y + outerOffset)
-                        : (x >= city.x - innerOffset && x <= city.x + innerOffset && y >= city.y - innerOffset && y <= city.y + innerOffset);
-                };
-
-                // 副城判定
-                const checkSubCity = (city) => {
+                    return this.isInCityRange(x, y, city, city.lost ? this.mainCityInner : this.mainCityOuter);
+                });
+                const ownSub = subCities.some(city => {
                     if (city.occupied !== currentPlayer || city.lost) return false;
-                    const areaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
-                    return x >= city.x - areaOffset && x <= city.x + areaOffset && y >= city.y - areaOffset && y <= city.y + areaOffset;
-                };
-
-                return this.game.state.mainCities.some(checkMainCity) || this.game.state.subCities.some(checkSubCity);
+                    return this.isInCityRange(x, y, city, this.subCityArea);
+                });
+                return ownMain || ownSub;
             }
 
-            isInEnemyPowerArea(x, y, player) {
-                const currentPlayer = player || this.game.getCurrentPlayer();
-                const checkMainCity = (city) => {
+            // 敌方势力范围（敌方主城 + 敌方占领的副城）
+            isInEnemyPowerArea(x, y) {
+                const currentPlayer = this.game.getCurrentPlayer();
+                const { mainCities, subCities } = this.game.state;
+                const enemyMain = mainCities.some(city => {
                     if (city.owner === currentPlayer) return false;
-                    const innerOffset = Math.floor(CONFIG.MAIN_CITY.INNER / 2);
-                    const outerOffset = Math.floor(CONFIG.MAIN_CITY.OUTER / 2);
-                    return !city.attacked 
-                        ? (x >= city.x - outerOffset && x <= city.x + outerOffset && y >= city.y - outerOffset && y <= city.y + outerOffset)
-                        : (x >= city.x - innerOffset && x <= city.x + innerOffset && y >= city.y - innerOffset && y <= city.y + innerOffset);
-                };
-
-                const checkSubCity = (city) => {
+                    return this.isInCityRange(x, y, city, city.attacked ? this.mainCityInner : this.mainCityOuter);
+                });
+                const enemySub = subCities.some(city => {
                     if (!city.occupied || city.occupied === currentPlayer || city.attacked) return false;
-                    const areaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
-                    return x >= city.x - areaOffset && x <= city.x + areaOffset && y >= city.y - areaOffset && y <= city.y + areaOffset;
-                };
-
-                return this.game.state.mainCities.some(checkMainCity) || this.game.state.subCities.some(checkSubCity);
+                    return this.isInCityRange(x, y, city, this.subCityArea);
+                });
+                return enemyMain || enemySub;
             }
 
             // 优化的城池围死判定算法
@@ -911,13 +910,10 @@
                 visited[startY][startX] = 1;
                 queue[qTail++] = [startX, startY];
 
-                // 八个移动方向
-                const directions = [[-1, 0], [0, 1], [1, 0], [0, -1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
-
                 while (qHead < qTail) {
                     const [x, y] = queue[qHead++];
 
-                    for (const [dx, dy] of directions) {
+                    for (const [dx, dy] of Judge.DIRS) {
                         const nx = x + dx;
                         const ny = y + dy;
 
@@ -1013,30 +1009,44 @@
                 return (type === 'circle' && currentPlayer === 'cross') || (type === 'cross' && currentPlayer === 'circle');
             }
 
+            // 统一判定：空格是否可作为落子目标（渲染高亮与实际走子共用）
+            canPlaceTo(x, y) {
+                const selected = this.game.state.selected;
+                return !!selected
+                    && this.game.state.grid[y][x].type === 'empty'
+                    && this.canPlace(x, y)
+                    && this.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.PLACE)
+                    && this.isPathClear(x, y);
+            }
+
+            // 统一判定：敌方棋子是否可被吃（渲染高亮与实际走子共用）
+            canEatAt(x, y) {
+                const selected = this.game.state.selected;
+                return !!selected
+                    && this.isEnemy(x, y)
+                    && this.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.EAT)
+                    && this.hasAdvantage();
+            }
+
+            // 攻城条件判定：检查城池四条边是否有攻击方棋子
             checkAttackCondition(x, y, size, attacker) {
                 const offset = Math.floor(size / 2);
                 let count = 0;
-                
-                const checkDirection = (checkX, checkY, dir) => {
-                    for (let j = checkX; j <= checkY; j++) {
-                        let nx = 0, ny = 0;
-                        switch (dir) {
-                            case 0: nx = j; ny = y - offset; break;
-                            case 1: nx = j; ny = y + offset; break;
-                            case 2: nx = x - offset; ny = j; break;
-                            case 3: nx = x + offset; ny = j; break;
-                        }
+                // 四条边方向增量：上下固定 y、左右固定 x
+                const dirs = [
+                    [0, -1], // 上
+                    [0, 1],  // 下
+                    [-1, 0], // 左
+                    [1, 0],  // 右
+                ];
+                for (const [dx, dy] of dirs) {
+                    for (let i = -(offset - 1); i <= offset - 1; i++) {
+                        const nx = dx === 0 ? x + i : x + dx * offset;
+                        const ny = dy === 0 ? y + i : y + dy * offset;
                         if (nx < 0 || nx >= CONFIG.size || ny < 0 || ny >= CONFIG.size) continue;
-                        if (this.game.state.grid[ny][nx].type === attacker) return true;
+                        if (this.game.state.grid[ny][nx].type === attacker) { count++; break; }
                     }
-                    return false;
-                };
-
-                if (checkDirection(x - offset + 1, x + offset - 1, 0)) count++; // 上
-                if (checkDirection(x - offset + 1, x + offset - 1, 1)) count++; // 下
-                if (checkDirection(y - offset + 1, y + offset - 1, 2)) count++; // 左
-                if (checkDirection(y - offset + 1, y + offset - 1, 3)) count++; // 右
-                
+                }
                 return count >= 4;
             }
         }
@@ -1054,7 +1064,7 @@
                 
                 this.game.state.subCities.forEach(city => {
                     if (this.game.judge.isInRange(x, y, city.x, city.y, areaOffset)) {
-                        if (!city.occupied) {
+                        if (!city.occupied && !city.lost) {
                             city.occupied = currentPlayer;
                             cityChanged = true;
                         }
@@ -1069,6 +1079,11 @@
             checkCityAttack(x, y) {
                 const currentPlayer = this.game.getCurrentPlayer();
                 let cityChanged = false;
+                // 对战模式下异步弹窗，避免阻塞动作发送（否则对方要等自己点完确认才收到通知）
+                const notify = (msg) => {
+                    if (this.game.network.isNetworkGame) { setTimeout(() => alert(msg), 0); }
+                    else { alert(msg); }
+                };
                 
                 this.game.state.mainCities.forEach(city => {
                     if (city.owner !== currentPlayer) {
@@ -1082,7 +1097,7 @@
                             if (this.game.judge.isInRange(x, y, city.x, city.y, Math.floor(CONFIG.MAIN_CITY.OUTER / 2)) && !city.lost) {
                                 city.lost = true;
                                 cityChanged = true;
-                                alert(`主城(${city.x}, ${city.y})被攻破！`);
+                                notify(`主城(${city.x}, ${city.y})被攻破！`);
                             }
                         }
 
@@ -1090,7 +1105,7 @@
                             city.attacked = true;
                             city.lost = true;
                             cityChanged = true;
-                            alert(`主城(${city.x}, ${city.y})被围死！`);
+                            notify(`主城(${city.x}, ${city.y})被围死！`);
                         }
                     }
                 });
@@ -1107,8 +1122,10 @@
                             const innerOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
                             if (this.game.judge.isInRange(x, y, city.x, city.y, innerOffset) && !city.lost) {
                                 city.lost = true;
+                                city.occupied = null; // 攻破后副城变为无主之地
+                                city.attacked = false;
                                 cityChanged = true;
-                                alert(`副城(${city.x}, ${city.y})被敌方攻占！`);
+                                notify(`副城(${city.x}, ${city.y})被攻占！`);
                             }
                         }
                     }
@@ -1116,7 +1133,7 @@
                         city.attacked = true;
                         city.lost = true;
                         cityChanged = true;
-                        alert(`副城(${city.x}, ${city.y})被围死！`);
+                        notify(`副城(${city.x}, ${city.y})被围死！`);
                     }
                 });
                 
@@ -1372,7 +1389,8 @@
                 const subAreaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
                 this.game.state.subCities.forEach(subCity => {
                     if (!subCity.lost) {
-                        const owner = subCity.owner;
+                        // 副城兵力按实际占领方统计（未被占领时归建造方）
+                        const owner = subCity.occupied || subCity.owner;
                         let friendlyCount = 0;
                         for (let dy = -subAreaOffset; dy <= subAreaOffset; dy++) {
                             for (let dx = -subAreaOffset; dx <= subAreaOffset; dx++) {
@@ -1412,6 +1430,20 @@
             static CELL_SIZE = CONFIG.cell;
             static GAP_SIZE = 1;
             static CELL_STEP = Renderer.CELL_SIZE + Renderer.GAP_SIZE;
+            
+            // 颜色常量（棋盘格点统一配色）
+            static COLORS = {
+                BG: '#f9f4e8',          // 棋盘背景
+                GRID: '#e8d8b8',        // 网格线
+                BORDER: '#b8a888',      // 棋盘边框
+                RESOURCE: '#8b5a2b88',  // 资源点
+                PIECE: '#8b5a2b',       // 棋子描边
+                HOVER: 'rgba(200, 200, 200, 0.3)',  // 悬停高亮（浅灰）
+                SELECTED: 'rgba(128, 200, 255, 0.8)', // 选中高亮（深蓝）
+                PLACE: 'rgba(186, 231, 255, 0.8)',    // 可落子高亮（浅蓝）
+                EAT: 'rgba(255, 204, 199, 0.8)',      // 可吃子高亮（橙红）
+                FLASH: 'rgba(100, 200, 100, 0.5)'        // 行动闪烁（绿）
+            };
             
             constructor(game) {
                 this.game = game;
@@ -1500,17 +1532,17 @@
 
             drawBoardBg() {
                 const ctxBg = this.game.ctxBg;
-                const { CELL_SIZE, CELL_STEP } = Renderer;
+                const { CELL_SIZE, CELL_STEP, COLORS } = Renderer;
                 const boardLogicalSize = CONFIG.size * CELL_STEP;
                 
                 ctxBg.clearRect(0, 0, BASE_BOARD_SIZE, BASE_BOARD_SIZE);
                 
                 // 绘制背景
-                ctxBg.fillStyle = '#f9f4e8';
+                ctxBg.fillStyle = COLORS.BG;
                 ctxBg.fillRect(0, 0, BASE_BOARD_SIZE, BASE_BOARD_SIZE);
                 
                 // 绘制网格线
-                ctxBg.strokeStyle = '#e8d8b8';
+                ctxBg.strokeStyle = COLORS.GRID;
                 ctxBg.lineWidth = 1;
                 
                 for (let y = 0; y <= CONFIG.size; y++) {
@@ -1530,7 +1562,7 @@
                 }
                 
                 // 最外圈网格线加粗，作为棋盘边框
-                ctxBg.strokeStyle = '#b8a888';
+                ctxBg.strokeStyle = COLORS.BORDER;
                 ctxBg.lineWidth = 1;
                 ctxBg.strokeRect(1.5, 1.5, boardLogicalSize - 3, boardLogicalSize - 3);
                 
@@ -1545,7 +1577,7 @@
                             const { cellX, cellY } = Renderer.getCellPos(x, y);
                             const cx = cellX + CELL_SIZE/2, cy = cellY + CELL_SIZE/2;
                             const size = CELL_SIZE * 0.4;
-                            ctxBg.fillStyle = '#8b5a2b88';
+                            ctxBg.fillStyle = COLORS.RESOURCE;
                             ctxBg.fillRect(cx - size, cy - size, size * 2, size * 2);
                         }
                     }
@@ -1569,36 +1601,30 @@
 
             updateCell(x, y) {
                 const ctx = this.game.ctx;
-                const { CELL_SIZE, GAP_SIZE } = Renderer;
-                const { cellX, cellY } = Renderer.getCellPos(x, y);
+                const { CELL_SIZE, GAP_SIZE, CELL_STEP, COLORS } = Renderer;
+                const cellX = x * CELL_STEP;
+                const cellY = y * CELL_STEP;
                 const clearSize = CELL_SIZE + GAP_SIZE;
                 const state = this.game.state;
                 const cellState = state.grid[y][x];
+                const judge = this.game.judge;
                 
                 // 1. 清除单元格区域（含间隙，防止残留）
                 ctx.clearRect(cellX, cellY, clearSize, clearSize);
 
-                // 2. 绘制高亮底色（只覆盖单元格内部，保留间隙中的网格线）
-                const { selected, buildPhase } = state;
+                // 2. 绘制高亮底色
                 let highlightColor = null;
+                const { selected, buildPhase } = state;
                 
-                if (selected && selected.type !== 'mix' && selected.type !== 'resource') {
-                    // 选中状态高亮
+                if (selected) {
                     if (selected.x === x && selected.y === y) {
-                        highlightColor = 'rgba(128, 200, 255, 0.8)';
+                        highlightColor = COLORS.SELECTED;
                     } else if (['x-game', 'o-game', 'choose'].includes(buildPhase) 
-                        && cellState.type !== 'mix' 
                         && (this.game.stats.circle + this.game.stats.cross) > 1) {
-                        const judge = this.game.judge;
-                        if (cellState.type === 'empty' 
-                            && judge.canPlace(x, y) 
-                            && judge.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.PLACE) 
-                            && judge.isPathClear(x, y)) {
-                            highlightColor = 'rgba(186, 231, 255, 0.8)';
-                        } else if (judge.isEnemy(x, y) 
-                            && judge.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.EAT) 
-                            && judge.hasAdvantage()) {
-                            highlightColor = 'rgba(255, 204, 199, 0.8)';
+                        if (judge.canPlaceTo(x, y)) {
+                            highlightColor = COLORS.PLACE;
+                        } else if (judge.canEatAt(x, y)) {
+                            highlightColor = COLORS.EAT;
                         }
                     }
                 }
@@ -1608,15 +1634,16 @@
                     ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
                 }
 
-                // 3. 绘制棋子（在高亮之上）
-                const centerX = cellX + CELL_SIZE / 2;
-                const centerY = cellY + CELL_SIZE / 2;
-                const pieceSize = CELL_SIZE * 0.4;
-                this.drawPiece(ctx, cellState.type, centerX, centerY, pieceSize);
+                // 3. 绘制棋子（空单元格跳过）
+                if (cellState.type !== 'empty') {
+                    const centerX = cellX + CELL_SIZE / 2;
+                    const centerY = cellY + CELL_SIZE / 2;
+                    this.drawPiece(ctx, cellState.type, centerX, centerY, CELL_SIZE * 0.4);
+                }
             }
 
             drawPiece(ctx, type, x, y, size) {
-                ctx.strokeStyle = '#8b5a2b';
+                ctx.strokeStyle = Renderer.COLORS.PIECE;
                 ctx.lineWidth = 1;
                 switch(type) {
                     case 'circle':
@@ -1648,12 +1675,12 @@
 
             updateResourceBg(x, y, isResource) {
                 const ctxBg = this.game.ctxBg;
-                const { CELL_SIZE, CELL_STEP } = Renderer;
+                const { CELL_SIZE, CELL_STEP, COLORS } = Renderer;
                 const cx = x * CELL_STEP + CELL_SIZE / 2;
                 const cy = y * CELL_STEP + CELL_SIZE / 2;
                 const size = CELL_SIZE * 0.4;
                 if (isResource) {
-                    ctxBg.fillStyle = '#8b5a2b88';
+                    ctxBg.fillStyle = COLORS.RESOURCE;
                     ctxBg.fillRect(cx - size, cy - size, size * 2, size * 2);
                 } else {
                     ctxBg.clearRect(cx - size - 1, cy - size - 1, size * 2 + 2, size * 2 + 2);
@@ -1662,9 +1689,9 @@
 
             drawMainCityBg() {
                 const ctxBg = this.game.ctxBg;
-                const { CELL_STEP } = Renderer;
+                const { CELL_STEP, COLORS } = Renderer;
                 
-                ctxBg.strokeStyle = '#8b5a2b';
+                ctxBg.strokeStyle = COLORS.PIECE;
                 ctxBg.lineWidth = 2;
                 
                 this.game.state.mainCities.forEach(city => {
@@ -1711,9 +1738,9 @@
 
             drawSubCityBg() {
                 const ctxBg = this.game.ctxBg;
-                const { CELL_STEP } = Renderer;
+                const { CELL_STEP, COLORS } = Renderer;
                 
-                ctxBg.strokeStyle = '#8b5a2b';
+                ctxBg.strokeStyle = COLORS.PIECE;
                 ctxBg.lineWidth = 2;
                 
                 this.game.state.subCities.forEach(city => {
@@ -1748,7 +1775,7 @@
                 const { x: hoverX, y: hoverY, lastX, lastY } = this.game.hoverState;
                 if (hoverX === lastX && hoverY === lastY) return;
                 
-                const { CELL_SIZE } = Renderer;
+                const { CELL_SIZE, COLORS } = Renderer;
                 const ctx = this.game.ctx;
                 
                 // 清除旧悬停位置
@@ -1776,31 +1803,39 @@
                         }
                     }
                     const { cellX, cellY } = Renderer.getCellPos(hoverX, hoverY);
-                    ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                    ctx.fillStyle = COLORS.HOVER;
                     ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
                 }
             }
 
             // 闪烁队列管理
-            flashCell(x, y, color = 'rgba(0,200,0,0.45)', duration = 2000) {
+            flashCell(x, y, color = Renderer.COLORS.FLASH, duration = 2000) {
                 if (x < 0 || y < 0 || x >= CONFIG.size || y >= CONFIG.size) return;
                 const now = Date.now();
                 const expiry = Math.max(now + duration, this.lastScheduledExpiry + 1);
                 this.lastScheduledExpiry = expiry;
                 this.flashQueue.push({ x, y, color, expiry });
-                requestAnimationFrame(() => this.drawBoard());
+                // 只重绘闪烁覆盖层，不全量重绘
+                requestAnimationFrame(() => this.drawFlashesOverlay());
                 
                 // 安排清理定时器
                 if (!this.flashSchedulerTimer && this.flashQueue.length > 0) {
                     const processQueue = () => {
                         this.flashSchedulerTimer = null;
                         const now = Date.now();
-                        let removed = false;
+                        let removed = [];
                         while (this.flashQueue.length && this.flashQueue[0].expiry <= now) { 
-                            this.flashQueue.shift(); 
-                            removed = true; 
+                            removed.push(this.flashQueue.shift()); 
                         }
-                        if (removed) requestAnimationFrame(() => this.drawBoard());
+                        if (removed.length > 0) {
+                            // 只重绘过期闪烁的格子，不全量重绘
+                            requestAnimationFrame(() => {
+                                for (const { x, y } of removed) {
+                                    this.updateCell(x, y);
+                                }
+                                this.drawFlashesOverlay();
+                            });
+                        }
                         if (this.flashQueue.length > 0) {
                             const nextExpiry = this.flashQueue[0].expiry;
                             this.flashSchedulerTimer = setTimeout(processQueue, Math.max(0, nextExpiry - now) + 1);
@@ -1814,37 +1849,45 @@
             }
 
             flashAction(action, excludeSelect = false) {
+                const { COLORS } = Renderer;
                 if (!action) return;
                 if (action.fromX !== undefined && action.fromY !== undefined)
-                    this.flashCell(action.fromX, action.fromY, 'rgba(128, 200, 255, 0.8)', 3000);
+                    this.flashCell(action.fromX, action.fromY, COLORS.SELECTED, 3000);
                 if (action.x === undefined || action.y === undefined) return;
                 const color = (action.opt === 'x-eat' || action.opt === 'o-eat') 
-                    ? 'rgba(255, 204, 199, 0.8)' 
-                    : ((action.opt !== 'select' || !excludeSelect) ? 'rgba(100, 200, 100, 0.5)' : null);
+                    ? COLORS.EAT
+                    : ((action.opt !== 'select' || !excludeSelect) ? COLORS.FLASH : null);
                 if (color) this.flashCell(action.x, action.y, color, 3000);
             }
 
             clearFlashQueue() {
+                if (this.flashQueue.length > 0) {
+                    // 只重绘闪烁过的格子
+                    requestAnimationFrame(() => {
+                        for (const { x, y } of this.flashQueue) {
+                            this.updateCell(x, y);
+                        }
+                    });
+                }
                 this.flashQueue = [];
                 if (this.flashSchedulerTimer) { 
                     clearTimeout(this.flashSchedulerTimer); 
                     this.flashSchedulerTimer = null; 
                 }
                 this.lastScheduledExpiry = 0;
-                requestAnimationFrame(() => this.drawBoard());
             }
 
             drawFlashesOverlay() {
                 if (!this.flashQueue || this.flashQueue.length === 0) return;
                 const ctx = this.game.ctx;
                 const now = Date.now();
-                const { CELL_SIZE } = Renderer;
+                const { CELL_SIZE, COLORS } = Renderer;
                 ctx.save();
                 for (const entry of this.flashQueue) {
                     if (entry.expiry <= now) continue;
                     if (entry.x < 0 || entry.y < 0 || entry.x >= CONFIG.size || entry.y >= CONFIG.size) continue;
                     const { cellX, cellY } = Renderer.getCellPos(entry.x, entry.y);
-                    ctx.fillStyle = entry.color || 'rgba(0,200,0,0.45)';
+                    ctx.fillStyle = entry.color || COLORS.FLASH;
                     ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
                 }
                 ctx.restore();
@@ -1874,8 +1917,8 @@
                 this.game.stats = { ...this.game.stats, circle, cross, mix };
                 if (saveHistoryFlag) {
                     this.game.currentAction.textContent = actionMap[this.game.state.buildPhase] || '';
-                    const mainCross = this.game.state.mainCities.filter(city => city.owner === 'cross' && !city.attacked).length;
-                    const mainCircle = this.game.state.mainCities.filter(city => city.owner === 'circle' && !city.attacked).length;
+                    const mainCross = this.game.state.mainCities.filter(city => city.owner === 'cross' && !city.lost).length;
+                    const mainCircle = this.game.state.mainCities.filter(city => city.owner === 'circle' && !city.lost).length;
                     const subCircle = this.game.state.subCities.filter(city => city.occupied === 'circle' && !city.lost).length;
                     const subCross = this.game.state.subCities.filter(city => city.occupied === 'cross' && !city.lost).length;
                     this.game.circleCount.textContent = `◯ ${circle}`;
@@ -2014,7 +2057,6 @@
                 const handleTouchStart = (e) => {
                     this._settleSeq = (this._settleSeq || 0) + 1; // 取消进行中的仿真
                     this.game.isClick = true; // 防御：个别浏览器 click 与 isClick 复位时序错位
-                    // 无需 preventDefault：CSS touch-action:none 已阻止滚动/缩放/合成 mouse 事件，且不影响原生 click 合成
                     if (e.touches.length === 1) {
                         pinch = null; // 单指开始时清除双指状态，避免脏基准
                         const t = e.touches[0];
@@ -2074,7 +2116,6 @@
             reset() {
                 this._settleSeq = (this._settleSeq || 0) + 1; // 中断进行中的仿真
                 this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中断缩放动画
-                // 默认位置：棋盘居中（棋盘可大于视口，四周均可能自然越界）
                 const vw = this.game.scrollArea.clientWidth, vh = this.game.scrollArea.clientHeight;
                 appState.pan.x = (vw - BASE_BOARD_SIZE) / 2;
                 appState.pan.y = (vh - BASE_BOARD_SIZE) / 2;
@@ -2082,7 +2123,7 @@
                 this.game.randomMapBtn.disabled = false;
                 this.game.randomCitiesToggle.disabled = false;
                 this.game.resourceToggle.disabled = false;
-                this.game.winnerText.textContent = '- 未结算 -';
+                //this.game.winnerText.textContent = '- 未结算 -';
             }
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
@@ -2090,7 +2131,6 @@
             setZoom(level, skipTransition, centerX, centerY) {
                 level = clamp(parseFloat(level.toFixed(2)), CONFIG.minZoom, CONFIG.maxZoom);
                 if (Math.abs(level - appState.zoom) < 0.01) return;
-                if (!skipTransition && centerX !== undefined) { this.animateZoom(level, centerX, centerY); return; }
                 this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中止进行中的缩放动画
                 const pan = appState.pan, z0 = appState.zoom;
                 if (centerX !== undefined) {
@@ -2103,30 +2143,6 @@
                 pan.x = clamp(pan.x, r.x[0], r.x[1]);
                 pan.y = clamp(pan.y, r.y[0], r.y[1]);
                 this.applyZoom(level);
-            }
-
-            // 平滑缩放：150ms 内逐帧同步缩放与平移，锚点全程不动，避免跳变
-            animateZoom(target, cx, cy) {
-                const pan = appState.pan, z0 = appState.zoom;
-                const x0 = pan.x, y0 = pan.y;
-                const bx = (cx - x0) / z0, by = (cy - y0) / z0;
-                const dur = 150, t0 = performance.now();
-                const id = this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1;
-                const step = (now) => {
-                    if (this._zoomAnimSeq !== id) return; // 已被新的缩放取代
-                    const t = Math.min(1, (now - t0) / dur);
-                    const z = z0 + (target - z0) * (1 - Math.pow(1 - t, 3)); // ease-out
-                    pan.x = cx - bx * z;
-                    pan.y = cy - by * z;
-                    if (t === 1) { // 结束帧回正到边界内
-                        const r = this.panRange(target);
-                        pan.x = clamp(pan.x, r.x[0], r.x[1]);
-                        pan.y = clamp(pan.y, r.y[0], r.y[1]);
-                    }
-                    this.applyZoom(z);
-                    if (t < 1) requestAnimationFrame(step);
-                };
-                requestAnimationFrame(step);
             }
 
             // 允许的 pan 范围：棋盘四周至少保留 EDGE_MARGIN 在视口内（防拖丢）
@@ -2278,23 +2294,23 @@
             }
 
             updateRoomButtonsState() {
-                const createBtn = this.game.createRoomBtn;
-                const joinBtn = this.game.joinRoomBtn;
+                const BtnA = this.game.createRoomBtn;
+                const BtnB = this.game.joinRoomBtn;
                 if (this.roomState === 'creator') {
-                    createBtn.disabled = true;
-                    createBtn.textContent = '创建房间';
-                    joinBtn.disabled = false;
-                    joinBtn.textContent = '关闭房间';
+                    BtnA.disabled = true;
+                    BtnA.textContent = '创建房间';
+                    BtnB.disabled = false;
+                    BtnB.textContent = '关闭房间';
                 } else if (this.roomState === 'joiner') {
-                    joinBtn.disabled = true;
-                    joinBtn.textContent = '加入房间';
-                    createBtn.disabled = false;
-                    createBtn.textContent = '退出房间';
+                    BtnB.disabled = true;
+                    BtnB.textContent = '加入房间';
+                    BtnA.disabled = false;
+                    BtnA.textContent = '退出房间';
                 } else {
-                    createBtn.disabled = false;
-                    createBtn.textContent = '创建房间';
-                    joinBtn.disabled = false;
-                    joinBtn.textContent = '加入房间';
+                    BtnA.disabled = false;
+                    BtnA.textContent = '创建房间';
+                    BtnB.disabled = false;
+                    BtnB.textContent = '加入房间';
                 }
             }
 
@@ -2310,10 +2326,11 @@
                 this.game.roomIdInput.value = ''; this.game.roomIdInput.disabled = false;
                 this.game.playerRole.textContent = '未分配';
                 this.game.gameStatus.textContent = '准备中';
+                this.game.randomMapBtn.disabled = false; // 退出对战后恢复随机地图
                 this.updateRoomButtonsState();
             }
 
-            connectToServer() {
+            connectToServer(onConnected) {
                 if (this.ws) { alert('已经连接到服务器'); return; }
                 const input = prompt('请输入服务器IP及端口:', 'localhost:8080');
                 if (!input) return;
@@ -2324,10 +2341,10 @@
                     serverIp = parts[0];
                     port = parseInt(parts[1], 10) || 8080;
                 }
-                this.openSocket(serverIp, port);
+                this.openSocket(serverIp, port, false, onConnected);
             }
 
-            openSocket(serverIp, port, isReconnect = false) {
+            openSocket(serverIp, port, isReconnect = false, onConnected = null) {
                 this.serverIp = serverIp;
                 this.serverPort = port;
                 this._intentionalClose = false;
@@ -2336,13 +2353,12 @@
                 try {
                     this.ws = new WebSocket(`ws://${serverIp}:${port}`);
                     this.ws.onopen = () => {
-                        statusEl.textContent = `${serverIp}:${port}${isReconnect ? '（已重连）' : ''}`;
+                        statusEl.textContent = `${serverIp}:${port}`;
                         statusEl.style.color = '#4CAF50';
                         this.game.gameStatus.textContent = '已连接';
+                        if (onConnected) onConnected();
                         // 断线重连后自动恢复房间
-                        if (this.roomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
-                            this.ws.send(JSON.stringify({ type: 'join_room', roomId: this.roomId }));
-                        }
+                        if (this.roomId) { this.sendWs({ type: 'join_room', roomId: this.roomId }); }
                     };
                     this.ws.onmessage = (event) => { try { this.handleWebSocketMessage(JSON.parse(event.data)); } catch (error) { console.error('消息解析错误:', error); } };
                     this.ws.onclose = () => {
@@ -2352,7 +2368,7 @@
                             this.resetRoom();
                         } else if (this.serverIp) {
                             // 非主动断开 → 3 秒后自动重连
-                            statusEl.textContent = '连接断开，3秒后重连...'; statusEl.style.color = '#f44336';
+                            statusEl.textContent = '连接断开'; statusEl.style.color = '#f44336';
                             this._reconnectTimer = setTimeout(() => {
                                 if (!this._intentionalClose && !this.ws && this.serverIp) {
                                     this.openSocket(this.serverIp, this.serverPort, true);
@@ -2372,52 +2388,50 @@
                 this.resetRoom();
                 this.game.connectionStatus.textContent = '未连接'; this.game.connectionStatus.style.color = '#f44336';
                 this.serverIp = null; this.serverPort = null;
-                alert('已断开服务器连接');
             }
 
             createRoom() {
-                if (this.roomState === 'joiner') {
-                    this.leaveRoom();
-                    return;
-                }
-                this.connectToServer();
+                if (this.roomState === 'joiner') { this.leaveRoom(); return; }
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'create_room' }));
+                    this.sendWs({ type: 'create_room' });
                 } else {
-                    alert('请先连接服务器');
+                    // 首次需先建连，连接成功后自动发送
+                    this.connectToServer(() => this.sendWs({ type: 'create_room' }));
                 }
             }
 
             joinRoom() {
-                if (this.roomState === 'creator') {
-                    this.closeRoom();
-                    return;
-                }
+                if (this.roomState === 'creator') { this.closeRoom(); return; }
                 const roomId = this.game.roomIdInput.value.trim();
                 if (!roomId) { alert('请输入房间ID'); return; }
-                this.connectToServer();
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'join_room', roomId: roomId }));
+                    this.sendWs({ type: 'join_room', roomId: roomId });
                 } else {
-                    alert('请先连接服务器');
+                    // 首次需先建连，连接成功后自动发送
+                    this.connectToServer(() => this.sendWs({ type: 'join_room', roomId: roomId }));
                 }
             }
 
             closeRoom() {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'close_room' }));
-                }
+                this.sendWs({ type: 'close_room' });
                 this.resetRoom();
             }
 
             leaveRoom() {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: 'leave_room' }));
-                }
+                this.sendWs({ type: 'leave_room' });
                 this.resetRoom();
             }
 
-            sendGameAction(action) { if (this.ws && this.ws.readyState === WebSocket.OPEN) { this.ws.send(JSON.stringify({ type: 'game_action', action: action })); } }
+            // 统一的 WebSocket 发送入口（未连接时不发送）
+            sendWs(obj) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(obj));
+                    return true;
+                }
+                return false;
+            }
+
+            sendGameAction(action) { this.sendWs({ type: 'game_action', action: action }); }
 
             handleWebSocketMessage(data) {
                 switch (data.type) {
@@ -2434,6 +2448,7 @@
                         this.roomState = data.isHost ? 'creator' : 'joiner';
                         this.isHost = data.isHost;
                         this.roomId = data.roomId;
+                        this.game.roomIdInput.value = data.roomId; this.game.roomIdInput.disabled = true;
                         if (data.role) {
                             // 断线重连已恢复原角色，直接显示身份
                             this.playerRole = data.role; this.isNetworkGame = true; this.updateRoleDisplay();
@@ -2460,7 +2475,7 @@
                     case 'game_start': this.handleGameStart(data); break;
                     case 'game_action': this.handleGameAction(data); break;
                     case 'sync_request':
-                        if (this.ws && this.ws.readyState === WebSocket.OPEN) { this.ws.send(JSON.stringify({ type: 'sync_response', history: this.game.state.history, isMyTurn: !this.isMyTurn })); }
+                        this.sendWs({ type: 'sync_response', history: this.game.state.history, isMyTurn: !this.isMyTurn });
                         this.game.gameStatus.textContent = this.isMyTurn ? '轮到你' : '等待对手';
                         break;
                     case 'sync_state': this.handleSyncState(data); break;
@@ -2486,7 +2501,10 @@
                 this.playerRole = data.role;
                 this.isNetworkGame = true;
                 this.updateRoleDisplay();
-                if (data.role === 'first_player') { this.isMyTurn = true; alert('你是先手，请开始游戏'); } else { this.isMyTurn = false; alert('你是后手，等待先手操作'); }
+                if (data.role === 'first_player') { this.isMyTurn = true; alert('你是先手，请开始游戏'); } else {
+                    this.isMyTurn = false; alert('你是后手，等待先手操作');
+                    this.game.randomMapBtn.disabled = true; // 后手禁用随机地图
+                }
                 this.game.gameStatus.textContent = this.isMyTurn ? '轮到你' : '等待对手';
             }
 
