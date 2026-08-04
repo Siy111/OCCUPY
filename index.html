@@ -1435,10 +1435,10 @@
                 RESOURCE: '#8b5a2b88',  // 资源点
                 PIECE: '#8b5a2b',       // 棋子描边
                 HOVER: 'rgba(200, 200, 200, 0.3)',  // 悬停高亮（浅灰）
-                SELECTED: 'rgba(128, 200, 255, 0.5)', // 选中高亮（深蓝）
+                SELECTED: 'rgba(128, 200, 255, 0.8)', // 选中高亮（深蓝）
                 PLACE: 'rgba(186, 231, 255, 0.8)',    // 可落子高亮（浅蓝）
                 EAT: 'rgba(255, 204, 199, 0.8)',      // 可吃子高亮（橙红）
-                FLASH: 'rgba(100, 200, 100, 0.3)'        // 行动闪烁（绿）
+                FLASH: 'rgba(100, 200, 100, 0.5)'        // 行动闪烁（绿）
             };
             
             constructor(game) {
@@ -1591,8 +1591,6 @@
                         this.updateCell(x, y);
                     }
                 }
-                // 叠加闪烁效果
-                this.drawFlashesOverlay();
             }
 
             updateCell(x, y) {
@@ -1608,7 +1606,7 @@
                 // 1. 清除单元格区域（含间隙，防止残留）
                 ctx.clearRect(cellX, cellY, clearSize, clearSize);
 
-                // 2. 绘制高亮底色
+                // 2. 绘制高亮底色（闪烁优先作为底色，画在棋子下方）
                 let highlightColor = null;
                 const { selected, buildPhase } = state;
                 
@@ -1623,6 +1621,13 @@
                             highlightColor = COLORS.EAT;
                         }
                     }
+                }
+                
+                // 有未过期闪烁时，闪烁色作为底色（覆盖常驻高亮）
+                if (this.flashQueue.length) {
+                    const now = Date.now();
+                    const entry = this.flashQueue.find(e => e.expiry > now && e.x === x && e.y === y);
+                    if (entry) highlightColor = entry.color || COLORS.FLASH;
                 }
                 
                 if (highlightColor) {
@@ -1764,8 +1769,6 @@
                         this.updateCell(nx, ny);
                     }
                 }
-                // 局部重绘会清除闪烁色块，这里补画，避免闪烁提前消失
-                this.drawFlashesOverlay();
             }
 
             // 悬停高亮
@@ -1779,27 +1782,11 @@
                 // 清除旧悬停位置
                 if (lastX !== -1 && lastY !== -1) {
                     this.updateCell(lastX, lastY);
-                    if (this.flashQueue?.length) {
-                        const entry = this.flashQueue.find(e => e.expiry > Date.now() && e.x === lastX && e.y === lastY);
-                        if (entry) {
-                            const { cellX, cellY } = Renderer.getCellPos(lastX, lastY);
-                            ctx.fillStyle = entry.color;
-                            ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
-                        }
-                    }
                 }
                 
                 // 绘制新悬停位置
                 if (hoverX !== -1 && hoverY !== -1) {
                     this.updateCell(hoverX, hoverY);
-                    if (this.flashQueue?.length) {
-                        const entry = this.flashQueue.find(e => e.expiry > Date.now() && e.x === hoverX && e.y === hoverY);
-                        if (entry) {
-                            const { cellX, cellY } = Renderer.getCellPos(hoverX, hoverY);
-                            ctx.fillStyle = entry.color;
-                            ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
-                        }
-                    }
                     const { cellX, cellY } = Renderer.getCellPos(hoverX, hoverY);
                     ctx.fillStyle = COLORS.HOVER;
                     ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
@@ -1813,8 +1800,8 @@
                 const expiry = Math.max(now + duration, this.lastScheduledExpiry + 1);
                 this.lastScheduledExpiry = expiry;
                 this.flashQueue.push({ x, y, color, expiry });
-                // 只重绘闪烁覆盖层，不全量重绘
-                requestAnimationFrame(() => this.drawFlashesOverlay());
+                // 重绘该格（闪烁色作为底色画在棋子下方）
+                this.updateCell(x, y);
                 
                 // 安排清理定时器
                 if (!this.flashSchedulerTimer && this.flashQueue.length > 0) {
@@ -1826,12 +1813,11 @@
                             removed.push(this.flashQueue.shift()); 
                         }
                         if (removed.length > 0) {
-                            // 只重绘过期闪烁的格子，不全量重绘
+                            // 只重绘过期闪烁的格子，恢复原状
                             requestAnimationFrame(() => {
                                 for (const { x, y } of removed) {
                                     this.updateCell(x, y);
                                 }
-                                this.drawFlashesOverlay();
                             });
                         }
                         if (this.flashQueue.length > 0) {
@@ -1873,22 +1859,6 @@
                     this.flashSchedulerTimer = null; 
                 }
                 this.lastScheduledExpiry = 0;
-            }
-
-            drawFlashesOverlay() {
-                if (!this.flashQueue || this.flashQueue.length === 0) return;
-                const ctx = this.game.ctx;
-                const now = Date.now();
-                const { CELL_SIZE, COLORS } = Renderer;
-                ctx.save();
-                for (const entry of this.flashQueue) {
-                    if (entry.expiry <= now) continue;
-                    if (entry.x < 0 || entry.y < 0 || entry.x >= CONFIG.size || entry.y >= CONFIG.size) continue;
-                    const { cellX, cellY } = Renderer.getCellPos(entry.x, entry.y);
-                    ctx.fillStyle = entry.color || COLORS.FLASH;
-                    ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
-                }
-                ctx.restore();
             }
         }
 
