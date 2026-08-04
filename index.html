@@ -1408,21 +1408,23 @@
 
         // 渲染器类（绘制+闪烁+悬停高亮）
         class Renderer {
+            // 单元格尺寸常量
+            static CELL_SIZE = CONFIG.cell;
+            static GAP_SIZE = 1;
+            static CELL_STEP = Renderer.CELL_SIZE + Renderer.GAP_SIZE;
+            
             constructor(game) {
                 this.game = game;
                 this.flashQueue = [];
                 this.flashSchedulerTimer = null;
                 this.lastScheduledExpiry = 0;
-                const baseCellSize = CONFIG.cell;
-                const gapSize = 1;
 
                 // 视口坐标 → 棋盘格子坐标（pan 由 getBoundingClientRect 实测抵消，与缩放实现解耦）
                 const toCell = (clientX, clientY) => {
                     const rect = this.game.boardCanvas.getBoundingClientRect();
-                    const s = baseCellSize + gapSize;
                     return {
-                        x: Math.floor((clientX - rect.left) / appState.zoom / s),
-                        y: Math.floor((clientY - rect.top) / appState.zoom / s)
+                        x: Math.floor((clientX - rect.left) / appState.zoom / Renderer.CELL_STEP),
+                        y: Math.floor((clientY - rect.top) / appState.zoom / Renderer.CELL_STEP)
                     };
                 };
 
@@ -1457,6 +1459,14 @@
                 };
                 this.game.boardCanvas.addEventListener('mousemove', this.mouseMoveHandler);
             }
+            
+            // 统一坐标计算：网格坐标 → 像素坐标
+            static getCellPos(x, y) {
+                return {
+                    cellX: x * Renderer.CELL_STEP,
+                    cellY: y * Renderer.CELL_STEP
+                };
+            }
 
             reset() {
                 this.clearFlashQueue();
@@ -1465,21 +1475,16 @@
             }
 
             initBoard() {
-                const baseCellSize = CONFIG.cell;
-                const gapSize = 1;
-                
-                // 获取设备像素比，支持高分辨率屏幕
                 const dpr = window.devicePixelRatio || 1;
-                const canvasWidth = BASE_BOARD_SIZE * dpr;
-                const canvasHeight = BASE_BOARD_SIZE * dpr;
+                const canvasSize = BASE_BOARD_SIZE * dpr;
                 
-                // 设置两个canvas尺寸（考虑设备像素比）
-                this.game.boardBg.width = canvasWidth;
-                this.game.boardBg.height = canvasHeight;
-                this.game.boardCanvas.width = canvasWidth;
-                this.game.boardCanvas.height = canvasHeight;
+                // 设置两个canvas尺寸
+                this.game.boardBg.width = canvasSize;
+                this.game.boardBg.height = canvasSize;
+                this.game.boardCanvas.width = canvasSize;
+                this.game.boardCanvas.height = canvasSize;
                 
-                // 设置CSS显示尺寸（保持原始大小）
+                // 设置CSS显示尺寸
                 this.game.boardBg.style.width = `${BASE_BOARD_SIZE}px`;
                 this.game.boardBg.style.height = `${BASE_BOARD_SIZE}px`;
                 this.game.boardCanvas.style.width = `${BASE_BOARD_SIZE}px`;
@@ -1489,15 +1494,14 @@
                 this.game.ctxBg.scale(dpr, dpr);
                 this.game.ctx.scale(dpr, dpr);
 
-                // 绘制背景层（棋盘网格、城池、资源点）
+                // 绘制背景层
                 this.drawBoardBg();
             }
 
             drawBoardBg() {
                 const ctxBg = this.game.ctxBg;
-                const baseCellSize = CONFIG.cell;
-                const gapSize = 1;
-                const boardLogicalSize = CONFIG.size * (baseCellSize + gapSize);
+                const { CELL_SIZE, CELL_STEP } = Renderer;
+                const boardLogicalSize = CONFIG.size * CELL_STEP;
                 
                 ctxBg.clearRect(0, 0, BASE_BOARD_SIZE, BASE_BOARD_SIZE);
                 
@@ -1510,7 +1514,7 @@
                 ctxBg.lineWidth = 1;
                 
                 for (let y = 0; y <= CONFIG.size; y++) {
-                    const yPos = y * (baseCellSize + gapSize);
+                    const yPos = y * CELL_STEP;
                     ctxBg.beginPath();
                     ctxBg.moveTo(0, yPos);
                     ctxBg.lineTo(boardLogicalSize, yPos);
@@ -1518,7 +1522,7 @@
                 }
                 
                 for (let x = 0; x <= CONFIG.size; x++) {
-                    const xPos = x * (baseCellSize + gapSize);
+                    const xPos = x * CELL_STEP;
                     ctxBg.beginPath();
                     ctxBg.moveTo(xPos, 0);
                     ctxBg.lineTo(xPos, boardLogicalSize);
@@ -1538,9 +1542,11 @@
                 for (let y = 0; y < CONFIG.size; y++) {
                     for (let x = 0; x < CONFIG.size; x++) {
                         if (this.game.state.grid[y][x].type === 'resource') {
-                            const cellX = x * (baseCellSize + gapSize);
-                            const cellY = y * (baseCellSize + gapSize);
-                            this.drawResourceBg(ctxBg, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4);
+                            const { cellX, cellY } = Renderer.getCellPos(x, y);
+                            const cx = cellX + CELL_SIZE/2, cy = cellY + CELL_SIZE/2;
+                            const size = CELL_SIZE * 0.4;
+                            ctxBg.fillStyle = '#8b5a2b88';
+                            ctxBg.fillRect(cx - size, cy - size, size * 2, size * 2);
                         }
                     }
                 }
@@ -1551,109 +1557,104 @@
                 
                 ctx.clearRect(0, 0, BASE_BOARD_SIZE, BASE_BOARD_SIZE);
                 
-                // 更新所有单元格（棋子和高亮）
+                // 全量重绘所有单元格
                 for (let y = 0; y < CONFIG.size; y++) {
                     for (let x = 0; x < CONFIG.size; x++) {
                         this.updateCell(x, y);
                     }
                 }
-                // 绘制当前高亮队列（可能存在多个），确保先入先出
+                // 叠加闪烁效果
                 this.drawFlashesOverlay();
             }
 
             updateCell(x, y) {
                 const ctx = this.game.ctx;
-                const baseCellSize = CONFIG.cell;
-                const gapSize = 1;
-                const cellX = x * (baseCellSize + gapSize);
-                const cellY = y * (baseCellSize + gapSize);
+                const { CELL_SIZE, GAP_SIZE } = Renderer;
+                const { cellX, cellY } = Renderer.getCellPos(x, y);
+                const clearSize = CELL_SIZE + GAP_SIZE;
+                const state = this.game.state;
+                const cellState = state.grid[y][x];
                 
-                const cellState = this.game.state.grid[y][x];
-                const hasSelected = !!this.game.state.selected && this.game.state.selected.type !== 'mix' && this.game.state.selected.type !== 'resource';
-                const totalChess = this.game.stats.circle + this.game.stats.cross;
+                // 1. 清除单元格区域（含间隙，防止残留）
+                ctx.clearRect(cellX, cellY, clearSize, clearSize);
 
-                // 清除单元格区域
-                ctx.clearRect(cellX, cellY, baseCellSize, baseCellSize);
-
-                // 高亮绘制在棋子之下（作为底色），保证棋子清晰可见
-                // 选中状态高亮
-                if (hasSelected && this.game.state.selected?.x === x && this.game.state.selected?.y === y) {
-                    ctx.fillStyle = 'rgba(128, 200, 255, 0.8)';
-                    ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
-                }
-
-                // 可操作状态高亮
-                if (['x-game', 'o-game', 'choose'].includes(this.game.state.buildPhase) && hasSelected && cellState.type !== 'mix' && 
-                    totalChess > 1 && (x !== this.game.state.selected.x || y !== this.game.state.selected.y)) {
-                    if (cellState.type === 'empty' && this.game.judge.canPlace(x, y) 
-                        && this.game.judge.isInRange(x, y, this.game.state.selected.x, this.game.state.selected.y, CONFIG.RANGE.PLACE) 
-                        && this.game.judge.isPathClear(x, y)) {
-                        ctx.fillStyle = 'rgba(186, 231, 255, 0.8)';
-                        ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
-                    }
-                    else if (this.game.judge.isEnemy(x, y) 
-                        && this.game.judge.isInRange(x, y, this.game.state.selected.x, this.game.state.selected.y, CONFIG.RANGE.EAT) 
-                        && this.game.judge.hasAdvantage()) {
-                        ctx.fillStyle = 'rgba(255, 204, 199, 0.8)';
-                        ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+                // 2. 绘制高亮底色（只覆盖单元格内部，保留间隙中的网格线）
+                const { selected, buildPhase } = state;
+                let highlightColor = null;
+                
+                if (selected && selected.type !== 'mix' && selected.type !== 'resource') {
+                    // 选中状态高亮
+                    if (selected.x === x && selected.y === y) {
+                        highlightColor = 'rgba(128, 200, 255, 0.8)';
+                    } else if (['x-game', 'o-game', 'choose'].includes(buildPhase) 
+                        && cellState.type !== 'mix' 
+                        && (this.game.stats.circle + this.game.stats.cross) > 1) {
+                        const judge = this.game.judge;
+                        if (cellState.type === 'empty' 
+                            && judge.canPlace(x, y) 
+                            && judge.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.PLACE) 
+                            && judge.isPathClear(x, y)) {
+                            highlightColor = 'rgba(186, 231, 255, 0.8)';
+                        } else if (judge.isEnemy(x, y) 
+                            && judge.isInRange(x, y, selected.x, selected.y, CONFIG.RANGE.EAT) 
+                            && judge.hasAdvantage()) {
+                            highlightColor = 'rgba(255, 204, 199, 0.8)';
+                        }
                     }
                 }
-
-                // 棋子样式（只绘制圆圈、叉、混合棋子，资源点在背景层绘制）
-                switch(cellState.type) {
-                    case 'circle': this.drawCircle(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                    case 'cross': this.drawCross(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                    case 'mix': this.drawMix(ctx, cellX + baseCellSize/2, cellY + baseCellSize/2, baseCellSize * 0.4); break;
-                }
-            }
-
-            drawCircle(ctx, x, y, radius) {
-                ctx.strokeStyle = '#8b5a2b';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-
-            drawCross(ctx, x, y, size) {
-                ctx.strokeStyle = '#8b5a2b';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(x - size, y - size);
-                ctx.lineTo(x + size, y + size);
-                ctx.moveTo(x + size, y - size);
-                ctx.lineTo(x - size, y + size);
-                ctx.stroke();
-            }
-
-            drawMix(ctx, x, y, size) {
-                ctx.strokeStyle = '#8b5a2b';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.arc(x, y, size * 0.8, 0, Math.PI * 2);
-                ctx.stroke();
                 
-                ctx.beginPath();
-                ctx.moveTo(x - size * 0.6, y - size * 0.6);
-                ctx.lineTo(x + size * 0.6, y + size * 0.6);
-                ctx.moveTo(x + size * 0.6, y - size * 0.6);
-                ctx.lineTo(x - size * 0.6, y + size * 0.6);
-                ctx.stroke();
+                if (highlightColor) {
+                    ctx.fillStyle = highlightColor;
+                    ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
+                }
+
+                // 3. 绘制棋子（在高亮之上）
+                const centerX = cellX + CELL_SIZE / 2;
+                const centerY = cellY + CELL_SIZE / 2;
+                const pieceSize = CELL_SIZE * 0.4;
+                this.drawPiece(ctx, cellState.type, centerX, centerY, pieceSize);
             }
 
-            drawResourceBg(ctxBg, x, y, size) {
-                ctxBg.fillStyle = '#8b5a2b88';
-                ctxBg.fillRect(x - size, y - size, size * 2, size * 2);
+            drawPiece(ctx, type, x, y, size) {
+                ctx.strokeStyle = '#8b5a2b';
+                ctx.lineWidth = 1;
+                switch(type) {
+                    case 'circle':
+                        ctx.beginPath();
+                        ctx.arc(x, y, size, 0, Math.PI * 2);
+                        ctx.stroke();
+                        break;
+                    case 'cross':
+                        ctx.beginPath();
+                        ctx.moveTo(x - size, y - size);
+                        ctx.lineTo(x + size, y + size);
+                        ctx.moveTo(x + size, y - size);
+                        ctx.lineTo(x - size, y + size);
+                        ctx.stroke();
+                        break;
+                    case 'mix':
+                        ctx.beginPath();
+                        ctx.arc(x, y, size * 0.8, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(x - size * 0.6, y - size * 0.6);
+                        ctx.lineTo(x + size * 0.6, y + size * 0.6);
+                        ctx.moveTo(x + size * 0.6, y - size * 0.6);
+                        ctx.lineTo(x - size * 0.6, y + size * 0.6);
+                        ctx.stroke();
+                        break;
+                }
             }
 
             updateResourceBg(x, y, isResource) {
                 const ctxBg = this.game.ctxBg;
-                const cellStep = CONFIG.cell + 1;
-                const cx = x * cellStep + CONFIG.cell / 2;
-                const cy = y * cellStep + CONFIG.cell / 2;
-                const size = CONFIG.cell * 0.4;
+                const { CELL_SIZE, CELL_STEP } = Renderer;
+                const cx = x * CELL_STEP + CELL_SIZE / 2;
+                const cy = y * CELL_STEP + CELL_SIZE / 2;
+                const size = CELL_SIZE * 0.4;
                 if (isResource) {
-                    this.drawResourceBg(ctxBg, cx, cy, size);
+                    ctxBg.fillStyle = '#8b5a2b88';
+                    ctxBg.fillRect(cx - size, cy - size, size * 2, size * 2);
                 } else {
                     ctxBg.clearRect(cx - size - 1, cy - size - 1, size * 2 + 2, size * 2 + 2);
                 }
@@ -1661,9 +1662,7 @@
 
             drawMainCityBg() {
                 const ctxBg = this.game.ctxBg;
-                const cellSize = CONFIG.cell;
-                const gapSize = 1;
-                const scale = cellSize + gapSize;
+                const { CELL_STEP } = Renderer;
                 
                 ctxBg.strokeStyle = '#8b5a2b';
                 ctxBg.lineWidth = 2;
@@ -1678,26 +1677,26 @@
                     ];
                     
                     corners.forEach(corner => {
-                        const cornerX = corner.x * scale;
-                        const cornerY = corner.y * scale;
+                        const cornerX = corner.x * CELL_STEP;
+                        const cornerY = corner.y * CELL_STEP;
                         const hDir = corner.x < city.x ? 1 : -1;
                         const vDir = corner.y < city.y ? 1 : -1;
                         ctxBg.beginPath();
                         ctxBg.moveTo(cornerX, cornerY);
-                        ctxBg.lineTo(cornerX + hDir * scale, cornerY);
+                        ctxBg.lineTo(cornerX + hDir * CELL_STEP, cornerY);
                         ctxBg.moveTo(cornerX, cornerY);
-                        ctxBg.lineTo(cornerX, cornerY + vDir * scale);
+                        ctxBg.lineTo(cornerX, cornerY + vDir * CELL_STEP);
                         ctxBg.stroke();
                     });
 
                     const coreOffset = Math.floor(CONFIG.MAIN_CITY.INNER / 2);
-                    const coreX = (city.x - coreOffset) * scale;
-                    const coreY = (city.y - coreOffset) * scale;
-                    const coreSize = CONFIG.MAIN_CITY.INNER * scale;
+                    const coreX = (city.x - coreOffset) * CELL_STEP;
+                    const coreY = (city.y - coreOffset) * CELL_STEP;
+                    const coreSize = CONFIG.MAIN_CITY.INNER * CELL_STEP;
                     
                     if (city.owner === 'circle') {
                         ctxBg.beginPath();
-                        ctxBg.arc(city.x * scale + scale/2, city.y * scale + scale/2, coreSize/2, 0, Math.PI * 2);
+                        ctxBg.arc(city.x * CELL_STEP + CELL_STEP/2, city.y * CELL_STEP + CELL_STEP/2, coreSize/2, 0, Math.PI * 2);
                         ctxBg.stroke();
                     } else {
                         ctxBg.beginPath();
@@ -1712,18 +1711,16 @@
 
             drawSubCityBg() {
                 const ctxBg = this.game.ctxBg;
-                const cellSize = CONFIG.cell;
-                const gapSize = 1;
-                const scale = cellSize + gapSize;
+                const { CELL_STEP } = Renderer;
                 
                 ctxBg.strokeStyle = '#8b5a2b';
                 ctxBg.lineWidth = 2;
                 
                 this.game.state.subCities.forEach(city => {
                     const areaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
-                    const areaX = (city.x - areaOffset) * scale;
-                    const areaY = (city.y - areaOffset) * scale;
-                    const areaSize = CONFIG.SUB_CITY.AREA * scale;
+                    const areaX = (city.x - areaOffset) * CELL_STEP;
+                    const areaY = (city.y - areaOffset) * CELL_STEP;
+                    const areaSize = CONFIG.SUB_CITY.AREA * CELL_STEP;
                     
                     ctxBg.beginPath();
                     ctxBg.rect(areaX, areaY, areaSize, areaSize);
@@ -1732,48 +1729,55 @@
             }
 
             updateValidAreas(x, y) {
-                if (x !== undefined && y !== undefined) {
-                    const startX = Math.max(0, x - CONFIG.RANGE.PLACE);
-                    const endX = Math.min(CONFIG.size - 1, x + CONFIG.RANGE.PLACE);
-                    const startY = Math.max(0, y - CONFIG.RANGE.PLACE);
-                    const endY = Math.min(CONFIG.size - 1, y + CONFIG.RANGE.PLACE);
-                    
-                    for (let ny = startY; ny <= endY; ny++) {
-                        for (let nx = startX; nx <= endX; nx++) {
-                            this.updateCell(nx, ny);
-                        }
+                if (x === undefined || y === undefined) return;
+                const maxRange = Math.max(CONFIG.RANGE.PLACE, CONFIG.RANGE.EAT) + 1;
+                const startX = Math.max(0, x - maxRange);
+                const endX = Math.min(CONFIG.size - 1, x + maxRange);
+                const startY = Math.max(0, y - maxRange);
+                const endY = Math.min(CONFIG.size - 1, y + maxRange);
+                
+                for (let ny = startY; ny <= endY; ny++) {
+                    for (let nx = startX; nx <= endX; nx++) {
+                        this.updateCell(nx, ny);
                     }
                 }
             }
 
             // 悬停高亮
-            drawFlashForCell(x, y) {
-                if (!this.flashQueue || this.flashQueue.length === 0) return;
-                const now = Date.now();
-                const baseCellSize = CONFIG.cell, gapSize = 1;
+            updateHoverHighlight() {
+                const { x: hoverX, y: hoverY, lastX, lastY } = this.game.hoverState;
+                if (hoverX === lastX && hoverY === lastY) return;
+                
+                const { CELL_SIZE } = Renderer;
                 const ctx = this.game.ctx;
-                for (const e of this.flashQueue) {
-                    if (e.expiry > now && e.x === x && e.y === y) {
-                        const cellX = x * (baseCellSize + gapSize), cellY = y * (baseCellSize + gapSize);
-                        ctx.fillStyle = e.color;
-                        ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
-                        return;
+                
+                // 清除旧悬停位置
+                if (lastX !== -1 && lastY !== -1) {
+                    this.updateCell(lastX, lastY);
+                    if (this.flashQueue?.length) {
+                        const entry = this.flashQueue.find(e => e.expiry > Date.now() && e.x === lastX && e.y === lastY);
+                        if (entry) {
+                            const { cellX, cellY } = Renderer.getCellPos(lastX, lastY);
+                            ctx.fillStyle = entry.color;
+                            ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
+                        }
                     }
                 }
-            }
-
-            updateHoverHighlight() {
-                if (this.game.hoverState.x === this.game.hoverState.lastX && this.game.hoverState.y === this.game.hoverState.lastY) return;
-                if (this.game.hoverState.lastX !== -1 && this.game.hoverState.lastY !== -1) {
-                    this.updateCell(this.game.hoverState.lastX, this.game.hoverState.lastY);
-                    this.drawFlashForCell(this.game.hoverState.lastX, this.game.hoverState.lastY);
-                }
-                if (this.game.hoverState.x !== -1 && this.game.hoverState.y !== -1) {
-                    this.updateCell(this.game.hoverState.x, this.game.hoverState.y);
-                    this.drawFlashForCell(this.game.hoverState.x, this.game.hoverState.y);
-                    const cellX = this.game.hoverState.x * (CONFIG.cell + 1), cellY = this.game.hoverState.y * (CONFIG.cell + 1);
-                    this.game.ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
-                    this.game.ctx.fillRect(cellX, cellY, CONFIG.cell, CONFIG.cell);
+                
+                // 绘制新悬停位置
+                if (hoverX !== -1 && hoverY !== -1) {
+                    this.updateCell(hoverX, hoverY);
+                    if (this.flashQueue?.length) {
+                        const entry = this.flashQueue.find(e => e.expiry > Date.now() && e.x === hoverX && e.y === hoverY);
+                        if (entry) {
+                            const { cellX, cellY } = Renderer.getCellPos(hoverX, hoverY);
+                            ctx.fillStyle = entry.color;
+                            ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
+                        }
+                    }
+                    const { cellX, cellY } = Renderer.getCellPos(hoverX, hoverY);
+                    ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                    ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
                 }
             }
 
@@ -1781,28 +1785,31 @@
             flashCell(x, y, color = 'rgba(0,200,0,0.45)', duration = 2000) {
                 if (x < 0 || y < 0 || x >= CONFIG.size || y >= CONFIG.size) return;
                 const now = Date.now();
-                const desiredExpiry = now + duration;
-                const expiry = Math.max(desiredExpiry, this.lastScheduledExpiry + 1);
+                const expiry = Math.max(now + duration, this.lastScheduledExpiry + 1);
                 this.lastScheduledExpiry = expiry;
-                const entry = { x, y, color, expiry };
-                this.flashQueue.push(entry);
+                this.flashQueue.push({ x, y, color, expiry });
                 requestAnimationFrame(() => this.drawBoard());
+                
+                // 安排清理定时器
                 if (!this.flashSchedulerTimer && this.flashQueue.length > 0) {
                     const processQueue = () => {
                         this.flashSchedulerTimer = null;
                         const now = Date.now();
                         let removed = false;
-                        while (this.flashQueue.length && this.flashQueue[0].expiry <= now) { this.flashQueue.shift(); removed = true; }
+                        while (this.flashQueue.length && this.flashQueue[0].expiry <= now) { 
+                            this.flashQueue.shift(); 
+                            removed = true; 
+                        }
                         if (removed) requestAnimationFrame(() => this.drawBoard());
                         if (this.flashQueue.length > 0) {
                             const nextExpiry = this.flashQueue[0].expiry;
-                            const delay = Math.max(0, nextExpiry - now);
-                            this.flashSchedulerTimer = setTimeout(processQueue, delay + 1);
-                        } else { this.lastScheduledExpiry = 0; }
+                            this.flashSchedulerTimer = setTimeout(processQueue, Math.max(0, nextExpiry - now) + 1);
+                        } else { 
+                            this.lastScheduledExpiry = 0; 
+                        }
                     };
                     const nextExpiry = this.flashQueue[0].expiry;
-                    const delay = Math.max(0, nextExpiry - now);
-                    this.flashSchedulerTimer = setTimeout(processQueue, delay + 1);
+                    this.flashSchedulerTimer = setTimeout(processQueue, Math.max(0, nextExpiry - Date.now()) + 1);
                 }
             }
 
@@ -1811,15 +1818,18 @@
                 if (action.fromX !== undefined && action.fromY !== undefined)
                     this.flashCell(action.fromX, action.fromY, 'rgba(128, 200, 255, 0.8)', 3000);
                 if (action.x === undefined || action.y === undefined) return;
-                if (action.opt === 'x-eat' || action.opt === 'o-eat')
-                    this.flashCell(action.x, action.y, 'rgba(255, 204, 199, 0.8)', 3000);
-                else if (action.opt !== 'select' || !excludeSelect)
-                    this.flashCell(action.x, action.y, 'rgba(100, 200, 100, 0.5)', 3000);
+                const color = (action.opt === 'x-eat' || action.opt === 'o-eat') 
+                    ? 'rgba(255, 204, 199, 0.8)' 
+                    : ((action.opt !== 'select' || !excludeSelect) ? 'rgba(100, 200, 100, 0.5)' : null);
+                if (color) this.flashCell(action.x, action.y, color, 3000);
             }
 
             clearFlashQueue() {
                 this.flashQueue = [];
-                if (this.flashSchedulerTimer) { clearTimeout(this.flashSchedulerTimer); this.flashSchedulerTimer = null; }
+                if (this.flashSchedulerTimer) { 
+                    clearTimeout(this.flashSchedulerTimer); 
+                    this.flashSchedulerTimer = null; 
+                }
                 this.lastScheduledExpiry = 0;
                 requestAnimationFrame(() => this.drawBoard());
             }
@@ -1827,15 +1837,15 @@
             drawFlashesOverlay() {
                 if (!this.flashQueue || this.flashQueue.length === 0) return;
                 const ctx = this.game.ctx;
-                const baseCellSize = CONFIG.cell, gapSize = 1;
                 const now = Date.now();
+                const { CELL_SIZE } = Renderer;
                 ctx.save();
-                for (const e of this.flashQueue) {
-                    if (e.expiry <= now) continue;
-                    if (e.x < 0 || e.y < 0 || e.x >= CONFIG.size || e.y >= CONFIG.size) continue;
-                    const cellX = e.x * (baseCellSize + gapSize), cellY = e.y * (baseCellSize + gapSize);
-                    ctx.fillStyle = e.color || 'rgba(0,200,0,0.45)';
-                    ctx.fillRect(cellX, cellY, baseCellSize, baseCellSize);
+                for (const entry of this.flashQueue) {
+                    if (entry.expiry <= now) continue;
+                    if (entry.x < 0 || entry.y < 0 || entry.x >= CONFIG.size || entry.y >= CONFIG.size) continue;
+                    const { cellX, cellY } = Renderer.getCellPos(entry.x, entry.y);
+                    ctx.fillStyle = entry.color || 'rgba(0,200,0,0.45)';
+                    ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
                 }
                 ctx.restore();
             }
