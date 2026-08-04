@@ -2217,7 +2217,7 @@
             }
 
             performExport() {
-                const exportData = { meta: { version: "6", timestamp: new Date().toISOString(), buttons: { randomCitiesToggle: this.game.randomCitiesToggle.checked, resourceToggle: this.game.resourceToggle.checked } }, history: this.game.state.history };
+                const exportData = { meta: { version: "6", timestamp: new Date().toISOString() }, history: this.game.state.history };
                 const jsonStr = JSON.stringify(exportData); const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
                 const defaultBase = `占城棋_棋局${new Date().getTime()}`; let inputBase = prompt('请输入导出文件名：', defaultBase);
                 if (inputBase === null) return; inputBase = inputBase.trim(); if (inputBase === '') inputBase = defaultBase;
@@ -2260,10 +2260,6 @@
                 // 缩放复位走 viewport 统一入口（同步 transform 与滑块），以视口中心为锚点
                 const a = this.game.scrollArea;
                 this.game.viewport.setZoom(1, true, a.clientWidth / 2, a.clientHeight / 2);
-                if (data.meta && data.meta.buttons) {
-                    if (data.meta.buttons.randomCitiesToggle !== undefined) this.game.randomCitiesToggle.checked = data.meta.buttons.randomCitiesToggle;
-                    if (data.meta.buttons.resourceToggle !== undefined) this.game.resourceToggle.checked = data.meta.buttons.resourceToggle;
-                }
             }
         }
 
