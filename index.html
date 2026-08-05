@@ -2077,7 +2077,6 @@
                 this.game.randomMapBtn.disabled = false;
                 this.game.randomCitiesToggle.disabled = false;
                 this.game.resourceToggle.disabled = false;
-                //this.game.winnerText.textContent = '- 未结算 -';
             }
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
@@ -2215,7 +2214,6 @@
                 this.game.replayHistory(this.game.state.history.length - 1);
                 this.game.renderer.clearFlashQueue();
                 this.game.recorder.renderFullHistory();
-                // 缩放复位走 viewport 统一入口（同步 transform 与滑块），以视口中心为锚点
                 const a = this.game.scrollArea;
                 this.game.viewport.setZoom(1, true, a.clientWidth / 2, a.clientHeight / 2);
             }
