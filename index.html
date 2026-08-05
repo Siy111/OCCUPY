@@ -537,6 +537,13 @@
                 };
                 this.isClick = true;
 
+                // 恢复随机地图/资源点相关按钮初始状态
+                this.randomMapBtn.disabled = false;
+                this.randomCitiesToggle.disabled = false;
+                this.resourceToggle.disabled = false;
+                this.randomCitiesToggle.checked = true;
+                this.resourceToggle.checked = true;
+
                 this.hoverState.reset();
                 this.recorder.reset();
                 this.viewport.reset();
@@ -569,7 +576,7 @@
                     if (cell.type === 'empty' || cell.type === 'resource') {
                         const newType = cell.type === 'resource' ? 'empty' : 'resource';
                         cell.type = newType;
-                        this.renderer.drawBoardBg();
+                        this.renderer.updateResourceBg(x, y, newType === 'resource');
                         const opt = newType === 'resource' ? 'res' : 'eptRes';
                         this.recorder.saveHistory({ opt, x, y });
                         if (this.network.isNetworkGame) {
@@ -1056,25 +1063,18 @@
             checkSubCityOccupy(x, y) {
                 const areaOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
                 const currentPlayer = this.game.getCurrentPlayer();
-                let cityChanged = false;
                 
                 this.game.state.subCities.forEach(city => {
                     if (this.game.judge.isInRange(x, y, city.x, city.y, areaOffset)) {
                         if (!city.occupied && !city.lost) {
                             city.occupied = currentPlayer;
-                            cityChanged = true;
                         }
                     }
                 });
-                
-                if (cityChanged) {
-                    this.game.renderer.drawBoardBg();
-                }
             }
 
             checkCityAttack(x, y) {
                 const currentPlayer = this.game.getCurrentPlayer();
-                let cityChanged = false;
                 // 对战模式下异步弹窗，避免阻塞动作发送（否则对方要等自己点完确认才收到通知）
                 const notify = (msg) => {
                     if (this.game.network.isNetworkGame) { setTimeout(() => alert(msg), 0); }
@@ -1086,13 +1086,9 @@
                         const outerOffset = Math.floor(CONFIG.MAIN_CITY.SIZE / 2);
                         if (this.game.judge.isInRange(x, y, city.x, city.y, outerOffset)) {
                             const newAttackedState = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.MAIN_CITY.SIZE, currentPlayer);
-                            if (city.attacked !== newAttackedState) {
-                                city.attacked = newAttackedState;
-                                cityChanged = true;
-                            }
+                            city.attacked = newAttackedState;
                             if (this.game.judge.isInRange(x, y, city.x, city.y, Math.floor(CONFIG.MAIN_CITY.OUTER / 2)) && !city.lost) {
                                 city.lost = true;
-                                cityChanged = true;
                                 notify(`主城(${city.x}, ${city.y})被攻破！`);
                             }
                         }
@@ -1100,7 +1096,6 @@
                         if (!city.attacked && this.game.judge.isCitySurrounded(city, 'main')) {
                             city.attacked = true;
                             city.lost = true;
-                            cityChanged = true;
                             notify(`主城(${city.x}, ${city.y})被围死！`);
                         }
                     }
@@ -1111,16 +1106,12 @@
                         const outerOffset = Math.floor(CONFIG.SUB_CITY.SIZE / 2);
                         if (this.game.judge.isInRange(x, y, city.x, city.y, outerOffset)) {
                             const newAttackedState = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.SUB_CITY.SIZE, currentPlayer);
-                            if (city.attacked !== newAttackedState) {
-                                city.attacked = newAttackedState;
-                                cityChanged = true;
-                            }
+                            city.attacked = newAttackedState;
                             const innerOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
                             if (this.game.judge.isInRange(x, y, city.x, city.y, innerOffset) && !city.lost) {
                                 city.lost = true;
                                 city.occupied = null; // 攻破后副城变为无主之地
                                 city.attacked = false;
-                                cityChanged = true;
                                 notify(`副城(${city.x}, ${city.y})被攻占！`);
                             }
                         }
@@ -1128,14 +1119,9 @@
                     if (city.occupied && !city.attacked && this.game.judge.isCitySurrounded(city, 'sub')) {
                         city.attacked = true;
                         city.lost = true;
-                        cityChanged = true;
                         notify(`副城(${city.x}, ${city.y})被围死！`);
                     }
                 });
-                
-                if (cityChanged) {
-                    this.game.renderer.drawBoardBg();
-                }
             }
 
             processBuild(x, y, saveHistoryFlag = true) {
@@ -2213,7 +2199,7 @@
                             const importData = JSON.parse(event.target.result);
                             if (!this.validateImportData(importData)) { alert("导入失败：文件格式错误或数据不完整！"); return; }
                             this.restoreGameState(importData);
-                            this.game.renderer.initBoard(); this.game.renderer.drawBoardBg(); this.game.renderer.drawBoard();
+                            this.game.renderer.initBoard(); this.game.renderer.drawBoard();
                             this.game.recorder.updateDisplay(); alert("棋局导入成功！");
                         } catch (error) { console.error("导入解析失败：", error); alert(`导入失败：${error.message}`); }
                     };
@@ -2539,7 +2525,7 @@
                 if (data.isMyTurn !== undefined) this.isMyTurn = data.isMyTurn;
                 this.isNetworkGame = true;
                 this.game.recorder.renderFullHistory();
-                this.game.renderer.initBoard(); this.game.renderer.drawBoardBg(); this.game.renderer.drawBoard();
+                this.game.renderer.initBoard(); this.game.renderer.drawBoard();
                 this.game.recorder.updateDisplay();
             }
         }
