@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>占城棋</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='black' stroke-width='3'/%3E%3C/svg%3E">
     <style>
         * {
             margin: 0;
@@ -412,16 +413,13 @@
             MAIN_CITY: { SIZE: 9, OUTER: 7, INNER: 3 },
             SUB_CITY: { SIZE: 7, AREA: 5 }
         });
-        const BASE_BOARD_SIZE = CONFIG.size * (CONFIG.cell + 1);
-        const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
-        const EDGE_MARGIN = 80; // 棋盘至少保留该宽度（px）在视口内，防止拖丢
-        // 橡皮筋：拖拽越界时按 15% 衰减跟手（极轻阻力），松手后由 simulate 的弱弹簧轻微弹回
-        const elastic = (v, min, max) => v < min ? min + (v - min) * 0.15 : (v > max ? max + (v - max) * 0.15 : v);
+        const BASE_BOARD_SIZE = CONFIG.size * (CONFIG.cell + 1); // 棋盘总边长（px），Renderer/Viewport 共用
 
         // 运行时状态
         const appState = {
             zoom: 1,        // 缩放比例（运行时可修改）
-            pan: { x: 0, y: 0 }  // 棋盘左上角在视窗中的屏幕位置（自由平移，可为负/超出视窗边缘）
+            pan: { x: 0, y: 0 },       // 视觉位置（= Viewport.elastic(panTarget)，越界被压缩封顶）
+            panTarget: { x: 0, y: 0 }  // 目标位置（手指/惯性驱动，可越界任意远，物理弹簧作用于此）
         };
 
         // 悬停状态管理类
@@ -1949,34 +1947,51 @@
 
         // 视口类（缩放+拖拽）
         class Viewport {
+            static EDGE_MARGIN = 80; // 棋盘至少保留该宽度（px）在视口内，防止拖丢
+            static MAX_OVER = 80; // 最大越界像素（拖拽弹性与飞界软墙共用，保证回弹手感一致）
+            static clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+            // 线性橡皮筋：越界按固定比例跟手，且视觉越界不超过 MAX_OVER
+            static elastic(v, min, max) {
+                const over = v < min ? min - v : v > max ? v - max : 0;
+                if (!over) return v;
+                const k = Math.min(over * 0.15, Viewport.MAX_OVER);
+                return v < min ? min - k : max + k;
+            }
+
             constructor(game) {
                 this.game = game;
 
                 // 拖拽平移（自由平移：棋盘边缘可进入视窗内部）
                 let isDragging = false, startX, startY, startPanX, startPanY, dragStartX, dragStartY;
                 let velX = 0, velY = 0, lastX = 0, lastY = 0, lastT = 0; // 松手速度（px/ms），用于惯性滑行
-                const DRAG_THRESHOLD = 2;
+                const DRAG_THRESHOLD = 6; // 鼠标拖动阈值：低于此位移视为点击（业界共识 4-6px，取 5）
                 const scrollArea = this.game.scrollArea;
                 const handleMouseDown = (e) => {
                     this._settleSeq = (this._settleSeq || 0) + 1; // 取消进行中的仿真
                     isDragging = true; this.game.isClick = true; dragStartX = e.clientX; dragStartY = e.clientY;
                     startX = e.pageX - scrollArea.getBoundingClientRect().left;
                     startY = e.pageY - scrollArea.getBoundingClientRect().top;
-                    startPanX = appState.pan.x; startPanY = appState.pan.y;
+                    startPanX = appState.panTarget.x; startPanY = appState.panTarget.y; // 目标坐标，保证仿真中断时仍 1:1
+                    lastT = 0; // 重置速度采样基准，避免复用上一次拖拽的旧值
                     scrollArea.style.cursor = 'grabbing'; document.body.style.userSelect = 'none';
                 };
                 const handleMouseMove = (e) => {
                     if (!isDragging) return;
                     if (Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY) > DRAG_THRESHOLD) this.game.isClick = false;
                     const x = e.pageX - scrollArea.getBoundingClientRect().left, y = e.pageY - scrollArea.getBoundingClientRect().top;
-                    // 记录速度（惯性用）
+                    // 记录速度（惯性用）：指数平滑，降低末帧抖动的敏锐度
                     const now = performance.now();
-                    if (lastT && now - lastT < 100) { velX = (x - lastX) / (now - lastT); velY = (y - lastY) / (now - lastT); }
+                    if (lastT && now - lastT < 100) {
+                        velX = velX * 0.7 + ((x - lastX) / (now - lastT)) * 0.3;
+                        velY = velY * 0.7 + ((y - lastY) / (now - lastT)) * 0.3;
+                    }
                     lastX = x; lastY = y; lastT = now;
-                    // 1:1 跟手拖动 + 极轻橡皮筋（越界阻力很小）
+                    // 1:1 跟手拖动：目标位置不压缩，视觉位置统一由弹性映射（越界压缩且封顶）
                     const r = this.panRange(appState.zoom);
-                    appState.pan.x = elastic(startPanX + (x - startX), r.x[0], r.x[1]);
-                    appState.pan.y = elastic(startPanY + (y - startY), r.y[0], r.y[1]);
+                    appState.panTarget.x = startPanX + (x - startX);
+                    appState.panTarget.y = startPanY + (y - startY);
+                    appState.pan.x = Viewport.elastic(appState.panTarget.x, r.x[0], r.x[1]);
+                    appState.pan.y = Viewport.elastic(appState.panTarget.y, r.y[0], r.y[1]);
                     this.render();
                 };
                 const handleMouseUp = () => {
@@ -1994,8 +2009,8 @@
                     e.preventDefault();
                     const rect = scrollArea.getBoundingClientRect();
                     const dy = Math.max(-100, Math.min(100, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
-                    const newZoom = clamp(appState.zoom * Math.pow(1.1, -dy / 100), CONFIG.minZoom, CONFIG.maxZoom);
-                    this.setZoom(newZoom, true, e.clientX - rect.left, e.clientY - rect.top);
+                    const newZoom = Viewport.clamp(appState.zoom * Math.pow(1.1, -dy / 100), CONFIG.minZoom, CONFIG.maxZoom);
+                    this.setZoom(newZoom, e.clientX - rect.left, e.clientY - rect.top);
                 }, { passive: false });
 
                 // 触摸手势：单指平移，双指缩放（中心跟随手指）
@@ -2014,7 +2029,7 @@
                     if (e.touches.length === 1) {
                         pinch = null; // 单指开始时清除双指状态，避免脏基准
                         const t = e.touches[0];
-                        touchPan = { sx: t.clientX, sy: t.clientY, panX: appState.pan.x, panY: appState.pan.y, tx: t.clientX, ty: t.clientY, tt: performance.now() };
+                        touchPan = { sx: t.clientX, sy: t.clientY, panX: appState.panTarget.x, panY: appState.panTarget.y, tx: t.clientX, ty: t.clientY, tt: performance.now() };
                     } else if (e.touches.length === 2) {
                         touchPan = null; // 双指开始时清除单指状态，避免脏基准
                         const g = gesture(e);
@@ -2024,17 +2039,24 @@
                 const handleTouchMove = (e) => {
                     if (touchPan && e.touches.length === 1) {
                         const t = e.touches[0];
+                        // 拖动超过容差则视为拖动而非点击（Android 官方 TouchSlop 8dp，按 CSS px 计取 8）
+                        if (Math.hypot(t.clientX - touchPan.sx, t.clientY - touchPan.sy) > 8) this.game.isClick = false;
                         const now = performance.now();
-                        if (now - touchPan.tt < 100) { velX = (t.clientX - touchPan.tx) / (now - touchPan.tt); velY = (t.clientY - touchPan.ty) / (now - touchPan.tt); }
+                        if (now - touchPan.tt < 100) {
+                            velX = velX * 0.7 + ((t.clientX - touchPan.tx) / (now - touchPan.tt)) * 0.3;
+                            velY = velY * 0.7 + ((t.clientY - touchPan.ty) / (now - touchPan.tt)) * 0.3;
+                        }
                         touchPan.tx = t.clientX; touchPan.ty = t.clientY; touchPan.tt = now;
-                        // 1:1 跟手拖动 + 极轻橡皮筋（越界阻力很小）
+                        // 1:1 跟手拖动：目标位置不压缩，视觉位置统一由弹性映射（越界压缩且封顶）
                         const r = this.panRange(appState.zoom);
-                        appState.pan.x = elastic(touchPan.panX + (t.clientX - touchPan.sx), r.x[0], r.x[1]);
-                        appState.pan.y = elastic(touchPan.panY + (t.clientY - touchPan.sy), r.y[0], r.y[1]);
+                        appState.panTarget.x = touchPan.panX + (t.clientX - touchPan.sx);
+                        appState.panTarget.y = touchPan.panY + (t.clientY - touchPan.sy);
+                        appState.pan.x = Viewport.elastic(appState.panTarget.x, r.x[0], r.x[1]);
+                        appState.pan.y = Viewport.elastic(appState.panTarget.y, r.y[0], r.y[1]);
                         this.render();
                     } else if (pinch && e.touches.length === 2) {
                         const g = gesture(e);
-                        this.setZoom(clamp(pinch.zoom * (g.dist / pinch.dist), CONFIG.minZoom, CONFIG.maxZoom), true, g.x, g.y);
+                        this.setZoom(Viewport.clamp(pinch.zoom * (g.dist / pinch.dist), CONFIG.minZoom, CONFIG.maxZoom), g.x, g.y);
                     }
                 };
                 const handleTouchEnd = () => {
@@ -2051,8 +2073,8 @@
                 let sliderDragging = false;
                 const zoomSlider = this.game.zoomSlider;
                 const zoomThumb = this.game.zoomThumb;
-                const getZoomFromPos = (clientX) => { const rect = zoomSlider.getBoundingClientRect(); return CONFIG.minZoom + (CONFIG.maxZoom - CONFIG.minZoom) * clamp((clientX - rect.left) / rect.width, 0, 1); };
-                const zoomAtCenter = (level) => this.setZoom(level, true, scrollArea.clientWidth / 2, scrollArea.clientHeight / 2);
+                const getZoomFromPos = (clientX) => { const rect = zoomSlider.getBoundingClientRect(); return CONFIG.minZoom + (CONFIG.maxZoom - CONFIG.minZoom) * Viewport.clamp((clientX - rect.left) / rect.width, 0, 1); };
+                const zoomAtCenter = (level) => this.setZoom(level, scrollArea.clientWidth / 2, scrollArea.clientHeight / 2);
                 const handleThumbDown = (e) => { sliderDragging = true; zoomThumb.style.cursor = 'grabbing'; document.body.style.userSelect = 'none'; e.preventDefault(); };
                 const handleSliderClick = (e) => { if (e.target !== zoomThumb) zoomAtCenter(getZoomFromPos(e.clientX)); };
                 const handleSliderMouseMove = (e) => { if (sliderDragging) zoomAtCenter(getZoomFromPos(e.clientX)); };
@@ -2064,15 +2086,19 @@
                 document.addEventListener('touchmove', (e) => { if (!sliderDragging) return; e.preventDefault(); zoomAtCenter(getZoomFromPos(e.touches[0].clientX)); }, { passive: false });
 
                 // 窗口尺寸变化：刷新裁剪区域，越界的 pan 由仿真平滑弹回
-                window.addEventListener('resize', () => { this.render(); this.simulate(0, 0); });
+                window.addEventListener('resize', () => {
+                    this.render();
+                    appState.panTarget.x = appState.pan.x; appState.panTarget.y = appState.pan.y; // 目标对齐视觉，供弹簧拉回
+                    this.simulate(0, 0);
+                });
             }
 
             reset() {
                 this._settleSeq = (this._settleSeq || 0) + 1; // 中断进行中的仿真
-                this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中断缩放动画
                 const vw = this.game.scrollArea.clientWidth, vh = this.game.scrollArea.clientHeight;
                 appState.pan.x = (vw - BASE_BOARD_SIZE) / 2;
                 appState.pan.y = (vh - BASE_BOARD_SIZE) / 2;
+                appState.panTarget.x = appState.pan.x; appState.panTarget.y = appState.pan.y; // 同步目标
                 this.applyZoom(1); // 重置缩放并渲染（applyZoom 内部已 render）
                 this.game.randomMapBtn.disabled = false;
                 this.game.randomCitiesToggle.disabled = false;
@@ -2081,10 +2107,9 @@
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
 
-            setZoom(level, skipTransition, centerX, centerY) {
-                level = clamp(parseFloat(level.toFixed(2)), CONFIG.minZoom, CONFIG.maxZoom);
+            setZoom(level, centerX, centerY) {
+                level = Viewport.clamp(parseFloat(level.toFixed(2)), CONFIG.minZoom, CONFIG.maxZoom);
                 if (Math.abs(level - appState.zoom) < 0.01) return;
-                this._zoomAnimSeq = (this._zoomAnimSeq || 0) + 1; // 中止进行中的缩放动画
                 const pan = appState.pan, z0 = appState.zoom;
                 if (centerX !== undefined) {
                     // 缩放锚点：保持视口坐标 (centerX, centerY) 处的棋盘点不动
@@ -2093,49 +2118,46 @@
                 }
                 // 缩放后直接回正到边界内（而非橡皮筋），避免锚点持续漂移
                 const r = this.panRange(level);
-                pan.x = clamp(pan.x, r.x[0], r.x[1]);
-                pan.y = clamp(pan.y, r.y[0], r.y[1]);
+                pan.x = Viewport.clamp(pan.x, r.x[0], r.x[1]);
+                pan.y = Viewport.clamp(pan.y, r.y[0], r.y[1]);
+                appState.panTarget.x = pan.x; appState.panTarget.y = pan.y; // 同步目标
                 this.applyZoom(level);
             }
 
-            // 允许的 pan 范围：棋盘四周至少保留 EDGE_MARGIN 在视口内（防拖丢）
+            // 允许的 pan 范围：棋盘四周至少保留 Viewport.EDGE_MARGIN 在视口内（防拖丢）
             panRange(z) {
                 const vw = this.game.scrollArea.clientWidth, vh = this.game.scrollArea.clientHeight;
                 const bw = BASE_BOARD_SIZE * z, bh = BASE_BOARD_SIZE * z;
                 const range = (dim, b) => {
-                    let min = EDGE_MARGIN - b, max = dim - EDGE_MARGIN;
+                    let min = Viewport.EDGE_MARGIN - b, max = dim - Viewport.EDGE_MARGIN;
                     if (min > max) { const mid = (min + max) / 2; min = max = mid; } // 棋盘比视口小很多时取中点
                     return [min, max];
                 };
                 return { x: range(vw, bw), y: range(vh, bh) };
             }
 
-            // 松手后的仿真：惯性滑行 + 摩擦 + 微小橡皮筋弹力（一个方法完成，越界自动拉回）
+            // 松手后的仿真：统一物理模型——弹簧作用于目标位置，视觉由弹性映射压缩（拖拽与飞界同一算法）
             simulate(vx, vy) {
                 const r = this.panRange(appState.zoom);
                 const id = this._settleSeq = (this._settleSeq || 0) + 1;
-                const K = 5.0, K_BOUND = 2.4, SPRING = 0.2; // 界内摩擦 / 界外阻尼 / 回弹力
+                const v = { x: vx * 1000, y: vy * 1000 }; // px/ms → px/s
+                const FRICTION = 10, DAMP = 14, SPRING = 40; // 界内摩擦 / 界外阻尼 / 回弹力
                 let lastT = performance.now();
                 const step = (now) => {
                     if (this._settleSeq !== id) return; // 已被新手势打断
                     const dt = Math.min(now - lastT, 50) / 1000; // 秒，上限 50ms 防跳帧
                     lastT = now;
-                    const ox = appState.pan.x > r.x[1] ? appState.pan.x - r.x[1] : appState.pan.x < r.x[0] ? appState.pan.x - r.x[0] : 0;
-                    const oy = appState.pan.y > r.y[1] ? appState.pan.y - r.y[1] : appState.pan.y < r.y[0] ? appState.pan.y - r.y[0] : 0;
-                    const over = Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01; // 是否越界
-                    const fade = Math.exp(-(over ? K_BOUND : K) * dt); // 界外阻尼大，抑制振荡
-                    vx = vx * fade - SPRING * ox * dt;
-                    vy = vy * fade - SPRING * oy * dt;
-                    appState.pan.x += vx * dt * 1000;
-                    appState.pan.y += vy * dt * 1000;
-                    this.render();
-                    // 停稳：速度极小且基本回到界内
-                    if (Math.hypot(vx, vy) < 0.01 && Math.abs(ox) < 0.5 && Math.abs(oy) < 0.5) {
-                        appState.pan.x = clamp(appState.pan.x, r.x[0], r.x[1]);
-                        appState.pan.y = clamp(appState.pan.y, r.y[0], r.y[1]);
-                        this.render();
-                        return;
+                    let settled = true; // 两轴是否都基本回到界内
+                    for (const axis of ['x', 'y']) {
+                        const [lo, hi] = r[axis];
+                        const o = appState.panTarget[axis] > hi ? appState.panTarget[axis] - hi : appState.panTarget[axis] < lo ? appState.panTarget[axis] - lo : 0;
+                        if (Math.abs(o) > 0.5) settled = false;
+                        v[axis] -= ((Math.abs(o) > 0.01 ? DAMP : FRICTION) * v[axis] + SPRING * o) * dt; // 阻尼/摩擦 + 弹簧拉回
+                        appState.panTarget[axis] += v[axis] * dt;
+                        appState.pan[axis] = Viewport.elastic(appState.panTarget[axis], lo, hi); // 视觉 = 弹性映射
                     }
+                    this.render();
+                    if (Math.hypot(v.x, v.y) < 1 && settled) return; // 停稳（elastic 界内恒等，pan 已对齐）
                     requestAnimationFrame(step);
                 };
                 requestAnimationFrame(step);
@@ -2163,8 +2185,8 @@
                 this.game.boardCanvas.style.transform = t;
             }
 
-            zoomIn() { const a = this.game.scrollArea; this.setZoom(appState.zoom + 0.1, false, a.clientWidth / 2, a.clientHeight / 2); }
-            zoomOut() { const a = this.game.scrollArea; this.setZoom(appState.zoom - 0.1, false, a.clientWidth / 2, a.clientHeight / 2); }
+            zoomIn() { const a = this.game.scrollArea; this.setZoom(appState.zoom + 0.1, a.clientWidth / 2, a.clientHeight / 2); }
+            zoomOut() { const a = this.game.scrollArea; this.setZoom(appState.zoom - 0.1, a.clientWidth / 2, a.clientHeight / 2); }
         }
 
         // 文件管理类（导出/导入）
@@ -2215,7 +2237,7 @@
                 this.game.renderer.clearFlashQueue();
                 this.game.recorder.renderFullHistory();
                 const a = this.game.scrollArea;
-                this.game.viewport.setZoom(1, true, a.clientWidth / 2, a.clientHeight / 2);
+                this.game.viewport.setZoom(1, a.clientWidth / 2, a.clientHeight / 2);
             }
         }
 
