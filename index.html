@@ -1079,16 +1079,14 @@
                     else { alert(msg); }
                 };
                 
+                // 先统一重算附近城池的 attacked（与吃子共用 updateCityAttacked，避免重复逻辑）
+                this.updateCityAttacked(x, y);
+
                 this.game.state.mainCities.forEach(city => {
                     if (city.owner !== currentPlayer) {
-                        const outerOffset = Math.floor(CONFIG.MAIN_CITY.SIZE / 2);
-                        if (this.game.judge.isInRange(x, y, city.x, city.y, outerOffset)) {
-                            const newAttackedState = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.MAIN_CITY.SIZE, currentPlayer);
-                            city.attacked = newAttackedState;
-                            if (this.game.judge.isInRange(x, y, city.x, city.y, Math.floor(CONFIG.MAIN_CITY.OUTER / 2)) && !city.lost) {
-                                city.lost = true;
-                                notify(`主城(${city.x}, ${city.y})被攻破！`);
-                            }
+                        if (city.attacked && this.game.judge.isInRange(x, y, city.x, city.y, this.game.judge.mainCityOuter) && !city.lost) {
+                            city.lost = true;
+                            notify(`主城(${city.x}, ${city.y})被攻破！`);
                         }
 
                         if (!city.attacked && this.game.judge.isCitySurrounded(city, 'main')) {
@@ -1101,17 +1099,11 @@
 
                 this.game.state.subCities.forEach(city => {
                     if (city.occupied !== currentPlayer) {
-                        const outerOffset = Math.floor(CONFIG.SUB_CITY.SIZE / 2);
-                        if (this.game.judge.isInRange(x, y, city.x, city.y, outerOffset)) {
-                            const newAttackedState = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.SUB_CITY.SIZE, currentPlayer);
-                            city.attacked = newAttackedState;
-                            const innerOffset = Math.floor(CONFIG.SUB_CITY.AREA / 2);
-                            if (this.game.judge.isInRange(x, y, city.x, city.y, innerOffset) && !city.lost) {
-                                city.lost = true;
-                                city.occupied = null; // 攻破后副城变为无主之地
-                                city.attacked = false;
-                                notify(`副城(${city.x}, ${city.y})被攻占！`);
-                            }
+                        if (city.attacked && this.game.judge.isInRange(x, y, city.x, city.y, this.game.judge.subCityArea) && !city.lost) {
+                            city.lost = true;
+                            city.occupied = null; // 攻破后副城变为无主之地
+                            city.attacked = false;
+                            notify(`副城(${city.x}, ${city.y})被攻占！`);
                         }
                     }
                     if (city.occupied && !city.attacked && this.game.judge.isCitySurrounded(city, 'sub')) {
@@ -1210,6 +1202,7 @@
                     this.game.recorder.saveHistory({ opt: opt, fromX: this.game.state.selected?.x, fromY: this.game.state.selected?.y, x: x, y: y });
                 }
                 this.game.state.grid[y][x].type = 'mix';
+                this.updateCityAttacked(x, y); // 吃子可能拆掉城墙棋子，重算附近城池的 attacked
                 if (this.game.state.selected) {
                     const oldSelectedX = this.game.state.selected.x;
                     const oldSelectedY = this.game.state.selected.y;
@@ -1217,6 +1210,29 @@
                     this.game.renderer.updateValidAreas(oldSelectedX, oldSelectedY);
                 }
                 this.game.state.buildPhase = this.game.getCurrentPlayer() === 'cross' ? 'o-game' : 'x-game';
+            }
+
+            // 吃子后重算附近城池的 attacked（城墙棋子被吃后及时解除攻击状态）
+            // 注意：必须按各城实际攻击方（owner/occupier 的另一方）视角重算，而非吃子者视角
+            updateCityAttacked(x, y) {
+                const mainOffset = Math.floor(CONFIG.MAIN_CITY.SIZE / 2);
+                const subOffset = Math.floor(CONFIG.SUB_CITY.SIZE / 2);
+
+                this.game.state.mainCities.forEach(city => {
+                    if (city.lost) return;
+                    if (this.game.judge.isInRange(x, y, city.x, city.y, mainOffset)) {
+                        const attacker = city.owner === 'cross' ? 'circle' : 'cross';
+                        city.attacked = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.MAIN_CITY.SIZE, attacker);
+                    }
+                });
+
+                this.game.state.subCities.forEach(city => {
+                    if (city.lost || !city.occupied) return;
+                    if (this.game.judge.isInRange(x, y, city.x, city.y, subOffset)) {
+                        const attacker = city.occupied === 'cross' ? 'circle' : 'cross';
+                        city.attacked = this.game.judge.checkAttackCondition(city.x, city.y, CONFIG.SUB_CITY.SIZE, attacker);
+                    }
+                });
             }
 
             createRandomCities() {
