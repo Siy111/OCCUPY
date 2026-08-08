@@ -543,9 +543,12 @@
                 this.winnerText.textContent = '- 未结算 -';
                 this.isClick = true;
 
-                // 恢复随机地图/资源点相关按钮初始状态（disabled 已由 viewport.reset 统一还原）
+                // 重置棋盘生成相关按钮：恢复初始勾选态并解除禁用
                 this.randomCitiesToggle.checked = true;
                 this.resourceToggle.checked = true;
+                this.randomMapBtn.disabled = false;
+                this.randomCitiesToggle.disabled = false;
+                this.resourceToggle.disabled = false;
 
                 this.hoverState.reset();
                 this.recorder.reset();
@@ -837,29 +840,11 @@
                 return enemyMain || enemySub;
             }
 
-            // 优化的城池围死判定算法
-            isCitySurrounded(city, cityType) {
-                // 确定友好棋子类型
-                let friendlyType;
-                if (cityType === 'main') {
-                    friendlyType = city.owner === 'circle' ? 'circle' : 'cross';
-                } else if (cityType === 'sub') {
-                    // 只有被占领的副城才需要检查
-                    if (!city.occupied) return false;
-                    friendlyType = city.occupied === 'circle' ? 'circle' : 'cross';
-                } else {
-                    return false;
-                }
-
+            // 构建某颜色视角下的“可逃生区域”：从贴边可通行格反向 flood fill，每座城一次 O(1) 查表即可判定是否围死
+            buildEscapeGrid(friendlyType) {
                 const size = CONFIG.size;
-                const startX = city.x, startY = city.y;
 
-                // 快速检查：如果中心点已经在边缘，直接返回未被围死
-                if (startX === 0 || startX === size - 1 || startY === 0 || startY === size - 1) {
-                    return false;
-                }
-
-                // 预计算敌我势力格，避免在 BFS 中频繁调用 isInEnemyPowerArea / isInOwnPowerArea（这些函数会遍历城池数组）
+                // 预计算敌我势力格，避免在扩散中频繁调用 isInEnemyPowerArea / isInOwnPowerArea（这些函数会遍历城池数组）
                 const ownGrid = new Array(size);
                 const enemyGrid = new Array(size);
                 for (let y = 0; y < size; y++) {
@@ -904,49 +889,44 @@
                     }
                 });
 
-                // 初始化访问数组（使用Uint8Array提高内存效率）
-                const visited = new Array(size);
-                for (let i = 0; i < size; i++) visited[i] = new Uint8Array(size);
+                const canPass = (x, y) => {
+                    const cell = this.game.state.grid[y][x];
+                    return (cell.type === 'empty' && !enemyGrid[y][x]) ||
+                           (cell.type === friendlyType) ||
+                           (ownGrid[y][x] === 1);
+                };
+
+                // 逃生区域标记（Uint8Array 提高内存效率），种子为贴边可通行格（与 BFS“从可通行格一步踏入边缘即逃脱”等价）
+                const free = new Array(size);
+                for (let y = 0; y < size; y++) free[y] = new Uint8Array(size);
 
                 // 使用队列头索引替代 shift()，避免 O(n^2) 行为
                 const queue = new Array(size * size);
                 let qHead = 0, qTail = 0;
 
-                visited[startY][startX] = 1;
-                queue[qTail++] = [startX, startY];
+                // 种子只取自贴边环（x=1/x=size-2 两列 + y=1/y=size-2 两行），避免全图扫描的无效判断
+                const seed = (x, y) => {
+                    if (!free[y][x] && canPass(x, y)) {
+                        free[y][x] = 1;
+                        queue[qTail++] = [x, y];
+                    }
+                };
+                for (let x = 1; x < size - 1; x++) { seed(x, 1); seed(x, size - 2); }
+                for (let y = 2; y < size - 2; y++) { seed(1, y); seed(size - 2, y); }
 
                 while (qHead < qTail) {
                     const [x, y] = queue[qHead++];
-
                     for (const [dx, dy] of Judge.DIRS) {
                         const nx = x + dx;
                         const ny = y + dy;
-
-                        // 检查是否到达边缘（到达边缘说明未被围死）
-                        if (nx === 0 || nx === size - 1 || ny === 0 || ny === size - 1) {
-                            return false;
-                        }
-
-                        if (nx > 0 && nx < size - 1 && ny > 0 && ny < size - 1 && !visited[ny][nx]) {
-                            const cell = this.game.state.grid[ny][nx];
-
-                            // 通过预计算的势力格快速判断是否可通行
-                            const canPass = (
-                                (cell.type === 'empty' && !enemyGrid[ny][nx]) ||
-                                (cell.type === friendlyType) ||
-                                (ownGrid[ny][nx] === 1)
-                            );
-
-                            if (canPass) {
-                                visited[ny][nx] = 1;
-                                queue[qTail++] = [nx, ny];
-                            }
+                        if (nx > 0 && nx < size - 1 && ny > 0 && ny < size - 1 && !free[ny][nx] && canPass(nx, ny)) {
+                            free[ny][nx] = 1;
+                            queue[qTail++] = [nx, ny];
                         }
                     }
                 }
 
-                // BFS 完成且未触达边缘，说明被围死
-                return true;
+                return free;
             }
 
             // 判定函数
@@ -1111,11 +1091,18 @@
             }
 
             // 围死判定（落子与吃子共用；围死是 BFS 无路可走的更强条件，不受 attacked 影响，已 lost 的不重复判）
+            // 己方城池也需检查：自己的吃子会产生残骸（mix），可能阻塞己方城池的逃生路径
             checkCitySurrounded() {
-                const currentPlayer = this.game.getCurrentPlayer();
+                const size = CONFIG.size;
+                // 反向 flood fill：双色各构建一次“可逃生区域”，每座城 O(1) 查表
+                const freeGrid = {
+                    cross: this.game.judge.buildEscapeGrid('cross'),
+                    circle: this.game.judge.buildEscapeGrid('circle'),
+                };
+                const atEdge = (c) => c.x === 0 || c.x === size - 1 || c.y === 0 || c.y === size - 1;
 
                 this.game.state.mainCities.forEach(city => {
-                    if (city.owner !== currentPlayer && !city.lost && this.game.judge.isCitySurrounded(city, 'main')) {
+                    if (!city.lost && !atEdge(city) && !freeGrid[city.owner][city.y][city.x]) {
                         city.attacked = true;
                         city.lost = true;
                         this.notifyCity(`主城(${city.x}, ${city.y})被围死！`);
@@ -1123,7 +1110,7 @@
                 });
 
                 this.game.state.subCities.forEach(city => {
-                    if (city.occupied && !city.lost && this.game.judge.isCitySurrounded(city, 'sub')) {
+                    if (city.occupied && !city.lost && !atEdge(city) && !freeGrid[city.occupied][city.y][city.x]) {
                         city.attacked = true;
                         city.lost = true;
                         this.notifyCity(`副城(${city.x}, ${city.y})被围死！`);
@@ -1219,7 +1206,7 @@
                 }
                 this.game.state.grid[y][x].type = 'mix';
                 this.updateCityAttacked(x, y); // 吃子可能拆掉城墙棋子，重算附近城池的 attacked
-                this.checkCitySurrounded(); // 吃子可能完成包围（残骸阻塞敌方城池逃生路径）
+                this.checkCitySurrounded(); // 吃子可能完成包围（残骸/势力范围变化会阻塞敌我城池的逃生路径）
                 this.finishMove();
             }
 
@@ -2139,9 +2126,6 @@
                 appState.pan.y = (vh - BASE_BOARD_SIZE) / 2;
                 appState.panTarget.x = appState.pan.x; appState.panTarget.y = appState.pan.y; // 同步目标
                 this.applyZoom(1); // 重置缩放并渲染（applyZoom 内部已 render）
-                this.game.randomMapBtn.disabled = false;
-                this.game.randomCitiesToggle.disabled = false;
-                this.game.resourceToggle.disabled = false;
             }
 
             updateZoomSlider() { const percent = ((appState.zoom - CONFIG.minZoom) / (CONFIG.maxZoom - CONFIG.minZoom)) * 100; this.game.zoomFill.style.width = `${percent}%`; this.game.zoomThumb.style.left = `${percent}%`; this.game.zoomValue.textContent = `${Math.round(appState.zoom * 100)}%`; }
