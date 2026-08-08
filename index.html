@@ -533,12 +533,17 @@
                     circleResources: 0, crossResources: 0,
                     circleSubCityScore: 0, crossSubCityScore: 0
                 };
+                // 重置战果统计窗口（正常刷新由 calculateEndgame 更新，重新开局时需手动还原）
+                this.circleKill.textContent = `◯ 0`;
+                this.crossKill.textContent = `✕ 0`;
+                this.circleResources.textContent = `◯ 0`;
+                this.crossResources.textContent = `✕ 0`;
+                this.circleSubcity.textContent = `◯ 0`;
+                this.crossSubcity.textContent = `✕ 0`;
+                this.winnerText.textContent = '- 未结算 -';
                 this.isClick = true;
 
-                // 恢复随机地图/资源点相关按钮初始状态
-                this.randomMapBtn.disabled = false;
-                this.randomCitiesToggle.disabled = false;
-                this.resourceToggle.disabled = false;
+                // 恢复随机地图/资源点相关按钮初始状态（disabled 已由 viewport.reset 统一还原）
                 this.randomCitiesToggle.checked = true;
                 this.resourceToggle.checked = true;
 
@@ -787,10 +792,9 @@
             get mainCityOuter() { return Math.floor(CONFIG.MAIN_CITY.OUTER / 2); }
             get subCityArea()   { return Math.floor(CONFIG.SUB_CITY.AREA / 2); }
 
-            // 点是否在城市 offset 正方形范围内
+            // 点是否在城市 offset 正方形范围内（复用 isInRange 的判定逻辑）
             isInCityRange(x, y, city, offset) {
-                return x >= city.x - offset && x <= city.x + offset &&
-                       y >= city.y - offset && y <= city.y + offset;
+                return this.isInRange(x, y, city.x, city.y, offset);
             }
 
             // 主城内圈判定（不可落子区）
@@ -1114,9 +1118,14 @@
                 });
             }
 
-            processBuild(x, y, saveHistoryFlag = true) {
+            // 建城/随机地图后禁用随机地图相关按钮（避免重复逻辑）
+            disableMapButtons() {
                 this.game.randomMapBtn.disabled = true;
                 this.game.randomCitiesToggle.disabled = true;
+            }
+
+            processBuild(x, y, saveHistoryFlag = true) {
+                this.disableMapButtons();
                 const nowPhase = this.game.state.buildPhase;
                 
                 if (saveHistoryFlag) {
@@ -1237,12 +1246,13 @@
 
             createRandomCities() {
                 if (this.game.randomMapBtn.disabled) return;
+                // 网络对战中仅房主可生成随机地图（防止客人在同步前/重开后点击篡改棋盘）
+                if (this.game.network.isNetworkGame && !this.game.network.isHost) return;
                 const isRandomCitiesEnabled = this.game.randomCitiesToggle.checked;
                 const isResourceEnabled = this.game.resourceToggle.checked;
                 if (!isRandomCitiesEnabled && !isResourceEnabled) return;
                 
-                this.game.randomMapBtn.disabled = true;
-                this.game.randomCitiesToggle.disabled = true;
+                this.disableMapButtons();
                 this.game.resourceToggle.checked = false; // 取消勾选但保持可用，可继续编辑资源点
                 this.game.state.mainCities = [];
                 this.game.state.subCities = [];
@@ -1274,9 +1284,9 @@
                     const isSafeToPlace = (x, y) => {
                         if (x < 0 || x >= CONFIG.size || y < 0 || y >= CONFIG.size) return false;
                         const mainInnerOffset = Math.floor(CONFIG.MAIN_CITY.SIZE / 2);
-                        const inMainCity = this.game.state.mainCities.some(city => x >= city.x - mainInnerOffset && x <= city.x + mainInnerOffset && y >= city.y - mainInnerOffset && y <= city.y + mainInnerOffset);
+                        const inMainCity = this.game.state.mainCities.some(city => this.game.judge.isInCityRange(x, y, city, mainInnerOffset));
                         const subAreaOffset = Math.floor(CONFIG.SUB_CITY.SIZE / 2);
-                        const inSubCity = this.game.state.subCities.some(city => x >= city.x - subAreaOffset && x <= city.x + subAreaOffset && y >= city.y - subAreaOffset && y <= city.y + subAreaOffset);
+                        const inSubCity = this.game.state.subCities.some(city => this.game.judge.isInCityRange(x, y, city, subAreaOffset));
                         return !inMainCity && !inSubCity;
                     };
                     const generateResourceBlock = () => {
@@ -2489,7 +2499,6 @@
                 this.updateRoleDisplay();
                 if (data.role === 'first_player') { this.isMyTurn = true; alert('你是先手，请开始游戏'); } else {
                     this.isMyTurn = false; alert('你是后手，等待先手操作');
-                    this.game.randomMapBtn.disabled = true; // 后手禁用随机地图
                 }
                 this.game.gameStatus.textContent = this.isMyTurn ? '轮到你' : '等待对手';
             }
