@@ -1075,28 +1075,23 @@
                 });
             }
 
+            // 对战模式下异步弹窗，避免阻塞动作发送（否则对方要等自己点完确认才收到通知）
+            notifyCity(msg) {
+                if (this.game.network.isNetworkGame) { setTimeout(() => alert(msg), 0); }
+                else { alert(msg); }
+            }
+
             checkCityAttack(x, y) {
                 const currentPlayer = this.game.getCurrentPlayer();
-                // 对战模式下异步弹窗，避免阻塞动作发送（否则对方要等自己点完确认才收到通知）
-                const notify = (msg) => {
-                    if (this.game.network.isNetworkGame) { setTimeout(() => alert(msg), 0); }
-                    else { alert(msg); }
-                };
-                
                 // 先统一重算附近城池的 attacked（与吃子共用 updateCityAttacked，避免重复逻辑）
                 this.updateCityAttacked(x, y);
 
+                // 攻破/攻占判定（走入敌方城池范围才触发）
                 this.game.state.mainCities.forEach(city => {
                     if (city.owner !== currentPlayer) {
                         if (city.attacked && this.game.judge.isInRange(x, y, city.x, city.y, this.game.judge.mainCityOuter) && !city.lost) {
                             city.lost = true;
-                            notify(`主城(${city.x}, ${city.y})被攻破！`);
-                        }
-
-                        if (!city.attacked && this.game.judge.isCitySurrounded(city, 'main')) {
-                            city.attacked = true;
-                            city.lost = true;
-                            notify(`主城(${city.x}, ${city.y})被围死！`);
+                            this.notifyCity(`主城(${city.x}, ${city.y})被攻破！`);
                         }
                     }
                 });
@@ -1107,13 +1102,31 @@
                             city.lost = true;
                             city.occupied = null; // 攻破后副城变为无主之地
                             city.attacked = false;
-                            notify(`副城(${city.x}, ${city.y})被攻占！`);
+                            this.notifyCity(`副城(${city.x}, ${city.y})被攻占！`);
                         }
                     }
-                    if (city.occupied && !city.attacked && this.game.judge.isCitySurrounded(city, 'sub')) {
+                });
+
+                this.checkCitySurrounded();
+            }
+
+            // 围死判定（落子与吃子共用；围死是 BFS 无路可走的更强条件，不受 attacked 影响，已 lost 的不重复判）
+            checkCitySurrounded() {
+                const currentPlayer = this.game.getCurrentPlayer();
+
+                this.game.state.mainCities.forEach(city => {
+                    if (city.owner !== currentPlayer && !city.lost && this.game.judge.isCitySurrounded(city, 'main')) {
                         city.attacked = true;
                         city.lost = true;
-                        notify(`副城(${city.x}, ${city.y})被围死！`);
+                        this.notifyCity(`主城(${city.x}, ${city.y})被围死！`);
+                    }
+                });
+
+                this.game.state.subCities.forEach(city => {
+                    if (city.occupied && !city.lost && this.game.judge.isCitySurrounded(city, 'sub')) {
+                        city.attacked = true;
+                        city.lost = true;
+                        this.notifyCity(`副城(${city.x}, ${city.y})被围死！`);
                     }
                 });
             }
@@ -1196,13 +1209,7 @@
                 this.game.state.grid[y][x].type = this.game.getCurrentPlayer();
                 this.checkSubCityOccupy(x, y);
                 this.checkCityAttack(x, y);
-                if (this.game.state.selected) {
-                    const oldSelectedX = this.game.state.selected.x;
-                    const oldSelectedY = this.game.state.selected.y;
-                    this.game.state.selected = null;
-                    this.game.renderer.updateValidAreas(oldSelectedX, oldSelectedY);
-                }
-                this.game.state.buildPhase = this.game.getCurrentPlayer() === 'cross' ? 'o-game' : 'x-game';
+                this.finishMove();
             }
 
             processEat(x, y, saveHistoryFlag = true) {
@@ -1212,6 +1219,12 @@
                 }
                 this.game.state.grid[y][x].type = 'mix';
                 this.updateCityAttacked(x, y); // 吃子可能拆掉城墙棋子，重算附近城池的 attacked
+                this.checkCitySurrounded(); // 吃子可能完成包围（残骸阻塞敌方城池逃生路径）
+                this.finishMove();
+            }
+
+            // 落子/吃子后的收尾：清除选中高亮并切换到对方回合
+            finishMove() {
                 if (this.game.state.selected) {
                     const oldSelectedX = this.game.state.selected.x;
                     const oldSelectedY = this.game.state.selected.y;
