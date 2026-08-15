@@ -2425,6 +2425,7 @@
                         }
                         break;
                     case 'player_joined':
+                        this.opponentGone = false; // 对手已加入，解除等待状态
                         this.game.gameStatus.textContent = '游戏准备中'; alert('对手已加入');
                         break;
                     case 'opponent_disconnected':
@@ -2547,6 +2548,9 @@
                 this.game.recorder.renderFullHistory();
                 this.game.renderer.initBoard(); this.game.renderer.drawBoard();
                 this.game.recorder.updateDisplay();
+                // 同步完成，恢复正常状态显示（清除"等待同步"）
+                this.game.gameStatus.textContent = this.isMyTurn ? '轮到你' : '等待对手';
+                this.game.playerRole.textContent = this.isHost ? '房主' : '客人';
             }
         }
 
