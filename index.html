@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>占城棋</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='black' stroke-width='3'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%238b5a2b' stroke-width='3'/%3E%3C/svg%3E">
     <style>
         * {
             margin: 0;
@@ -25,7 +25,6 @@
         
         .game-wrapper {
             width: 100%;
-            max-width: 1400px;
             display: flex;
             gap: 20px;
         }
@@ -36,16 +35,10 @@
             border: 2px solid #b8a888;
             background: #f9f4e8;
             position: relative;
-            overflow: auto;
+            overflow: hidden; /* 棋盘 pan/缩放溢出由裁剪处理，不产生滚动 */
             touch-action: none; /* 手势由 JS 接管（单指平移、双指缩放） */
         }
-        
-        .chessboard-container::-webkit-scrollbar { display: none; }
-        
-        #virtualBoardContainer {
-            position: relative;
-        }
-        
+
         #boardBg, #board {
             transform-origin: 0 0;
             will-change: transform;
@@ -268,11 +261,9 @@
 <body>
     <div class="game-wrapper">
         <div class="chessboard-container" id="scrollArea">
-            <!-- 新增虚拟容器：解决缩放后滚动范围问题 -->
-            <div id="virtualBoardContainer">
-                <canvas id="boardBg" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
-                <canvas id="board" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
-            </div>
+            <!-- 画布直接挂载于棋盘容器，pan/缩放后溢出部分由 overflow: hidden 裁剪 -->
+            <canvas id="boardBg" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
+            <canvas id="board" style="display: block; position: absolute; top: 0; left: 0;"></canvas>
         </div>
 
         <div class="side-column">
@@ -471,7 +462,6 @@
                 this.boardCanvas = document.getElementById('board');
                 this.ctx = this.boardCanvas.getContext('2d');
                 this.scrollArea = document.getElementById('scrollArea');
-                this.virtualBoardContainer = document.getElementById('virtualBoardContainer');
                 this.currentAction = document.getElementById('currentAction');
                 this.circleCount = document.getElementById('circleCount');
                 this.crossCount = document.getElementById('crossCount');
@@ -641,19 +631,6 @@
                         this.sendLastAction(false);
                         this.recorder.updateDisplay(true);
                     }
-                }
-            }
-
-            switchPlayer() {
-                // 在游戏阶段切换buildPhase
-                if (this.state.buildPhase === 'x-game') {
-                    this.state.buildPhase = 'o-game';
-                } else if (this.state.buildPhase === 'o-game') {
-                    this.state.buildPhase = 'x-game';
-                }
-
-                if (this.network.isNetworkGame) {
-                    this.network.isMyTurn = !this.network.isMyTurn;
                 }
             }
 
@@ -2194,15 +2171,7 @@
 
             // 按当前 zoom+pan 渲染：pan 完全自由，棋盘任意位置均可显示（超出视口部分被裁剪）
             render() {
-                const scrollArea = this.game.scrollArea;
                 const z = appState.zoom, pan = appState.pan;
-                // 虚拟容器恒等于视口大小（仅尺寸变化时写入，避免动画期间反复设置 style）
-                const vw = scrollArea.clientWidth, vh = scrollArea.clientHeight;
-                if (this._vw !== vw || this._vh !== vh) {
-                    this._vw = vw; this._vh = vh;
-                    this.game.virtualBoardContainer.style.width = `${vw}px`;
-                    this.game.virtualBoardContainer.style.height = `${vh}px`;
-                }
                 const t = `translate(${pan.x}px, ${pan.y}px) scale(${z})`;
                 this.game.boardBg.style.transform = t;
                 this.game.boardCanvas.style.transform = t;
@@ -2374,10 +2343,11 @@
             }
 
             disconnectServer() {
+                if (!this.ws && !this.serverIp) { alert('未连接到服务器'); return; }
+                if (!confirm('确定断开连接吗？')) return;
                 this._intentionalClose = true;
                 clearTimeout(this._reconnectTimer);
                 if (this.ws) { this.ws.close(); this.ws = null; }
-                else if (!this.serverIp) { alert('未连接到服务器'); return; }
                 this.resetRoom();
                 this.game.connectionStatus.textContent = '未连接'; this.game.connectionStatus.style.color = '#f44336';
                 this.serverIp = null; this.serverPort = null;
@@ -2406,6 +2376,7 @@
             }
 
             closeRoom() {
+                if (!confirm('确定关闭当前房间吗？')) return;
                 this.sendWs({ type: 'close_room' });
                 this.resetRoom();
             }
@@ -2473,9 +2444,16 @@
                         break;
                     case 'sync_state': this.handleSyncState(data); break;
                     case 'player_left':
+                        // 房间保留：对手离开，留在房间等待新玩家/对手重连
                         alert(data.message || '对手离开了游戏');
+                        this.opponentGone = true;
+                        this.game.gameStatus.textContent = '对手已离开，等待加入';
+                        break;
+                    case 'room_closed':
+                        // 房间已关闭：退出对战
+                        alert(data.message || '房间已关闭');
                         this.resetRoom();
-                        this.game.gameStatus.textContent = '对手离开';
+                        this.game.gameStatus.textContent = '房间已关闭';
                         break;
                     case 'error':
                         if (data.message === '房间不存在') {
