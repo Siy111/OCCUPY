@@ -571,11 +571,9 @@
                     const cell = this.state.grid[y][x];
                     if (cell.type === 'empty' || cell.type === 'resource') {
                         const newType = cell.type === 'resource' ? 'empty' : 'resource';
-                        cell.type = newType;
-                        this.renderer.updateResourceBg(x, y, newType === 'resource');
-                        const opt = newType === 'resource' ? 'res' : 'eptRes';
-                        this.recorder.saveHistory({ opt, x, y });
+                        this.actionProcessor.processResourceEdit(x, y, newType);
                         if (this.network.isNetworkGame) {
+                            const opt = newType === 'resource' ? 'res' : 'eptRes';
                             this.network.sendGameAction({ opt, x, y });
                         }
                         this.recorder.renderFullHistory();
