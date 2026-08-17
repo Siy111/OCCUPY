@@ -23,38 +23,46 @@ def action_index(act):
     return N_PLACE + act["y"] * SIZE + act["x"]
 
 
+def _fill_rect(plane, cx, cy, off, val=1.0):
+    """把城市势力范围矩形（切比雪夫距离 off）填充进 2D 平面。"""
+    xa = max(0, cx - off)
+    xb = min(SIZE - 1, cx + off)
+    ya = max(0, cy - off)
+    yb = min(SIZE - 1, cy + off)
+    plane[ya:yb + 1, xa:xb + 1] = val
+
+
 def build_input(state, player):
-    """棋盘平面：5 通道 × 72×72（当前玩家视角）。"""
+    """棋盘平面：5 通道 × 72×72（当前玩家视角）。
+
+    向量化：棋子/残骸直接用布尔掩码，势力范围用矩形填充，
+    避免逐格调用 own_area/enemy_area（那是 5184 次×城市遍历的热点）。
+    """
     grid = state["grid"]
-    my = np.zeros((SIZE, SIZE), dtype=np.float32)
-    enemy = np.zeros((SIZE, SIZE), dtype=np.float32)
-    debris = np.zeros((SIZE, SIZE), dtype=np.float32)
+    enemy_p = E.CIRCLE if player == E.CROSS else E.CROSS
+    my = (grid == player).astype(np.float32)
+    enemy = (grid == enemy_p).astype(np.float32)
+    debris = np.isin(grid, (E.MIX, E.RESOURCE)).astype(np.float32)
     my_area = np.zeros((SIZE, SIZE), dtype=np.float32)
     en_area = np.zeros((SIZE, SIZE), dtype=np.float32)
-    enemy_p = E.CIRCLE if player == E.CROSS else E.CROSS
-
-    for y in range(SIZE):
-        for x in range(SIZE):
-            t = grid[y, x]
-            if t == player:
-                my[y, x] = 1.0
-            elif t == enemy_p:
-                enemy[y, x] = 1.0
-            elif t in (E.MIX, E.RESOURCE):
-                debris[y, x] = 1.0
-            if E.own_area(state, player, x, y):
-                my_area[y, x] = 1.0
-            if E.enemy_area(state, player, x, y):
-                en_area[y, x] = 1.0
-
+    for c in state["mainCities"]:
+        if c["owner"] == player:
+            _fill_rect(my_area, c["x"], c["y"], E.MAIN_INNER if c["lost"] else E.MAIN_OUTER)
+        elif not c["lost"]:
+            _fill_rect(en_area, c["x"], c["y"], E.MAIN_INNER if c["attacked"] else E.MAIN_OUTER)
+    for c in state["subCities"]:
+        if c["occupied"] == player and not c["lost"]:
+            _fill_rect(my_area, c["x"], c["y"], E.SUB_AREA)
+        elif c["occupied"] and c["occupied"] != player and not c["attacked"]:
+            _fill_rect(en_area, c["x"], c["y"], E.SUB_AREA)
     planes = np.stack([my, enemy, debris, my_area, en_area])
     return torch.from_numpy(planes).unsqueeze(0)  # (1, C, 72, 72)
 
 
-def legal_mask(state, player):
+def legal_mask(state, player, legal=None):
     """合法目标 mask：对每个策略索引标记是否存在合法动作。"""
     mask = np.zeros(N_ACTIONS, dtype=np.float32)
-    for act in E.legal_actions(state):
+    for act in (legal if legal is not None else E.legal_actions(state)):
         mask[action_index(act)] = 1.0
     return torch.from_numpy(mask)
 
@@ -92,11 +100,11 @@ def masked_policy(logits, mask):
 
 
 @torch.no_grad()
-def evaluate_net(net, state, player):
-    """MCTS 叶子评估：返回 (策略先验 np.array, 价值 float)。"""
+def evaluate_net(net, state, player, legal=None):
+    """MCTS 叶子评估：返回 (策略先验 np.array, 价值 float)。legal 可传入已算好的合法动作避免重复计算。"""
     net.eval()
     x = build_input(state, player)
-    mask = legal_mask(state, player)
+    mask = legal_mask(state, player, legal)
     logits, value = net(x)
     p = masked_policy(logits.squeeze(0), mask)
     return p.numpy(), float(value.item())
