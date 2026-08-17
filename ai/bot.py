@@ -145,7 +145,7 @@ class PyBot:
         self.send_action({"opt": "select", "x": action["selX"], "y": action["selY"]})
         # 停顿片刻再落子，模拟真人节奏（同时保持 thinking 防止重入）
         time.sleep(0.6 + random.random() * 0.6)
-        self.send_action({"opt": opt, "x": action["x"], "y": action["y"]})
+        self.send_action({"opt": opt, "fromX": action["selX"], "fromY": action["selY"], "x": action["x"], "y": action["y"]})
         act = {"opt": opt, "fromX": action["selX"], "fromY": action["selY"], "x": action["x"], "y": action["y"]}
         self.history.append(act)
         self.apply_action(self.state, act)
