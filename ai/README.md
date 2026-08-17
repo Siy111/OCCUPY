@@ -52,6 +52,7 @@ python ai/train.py 3 16 10 0.01 50 8 120 ai/model.json
 | 步数上限（max_steps） | 120 | 单局步数超过该值强制结束，防止死循环拖垮训练 |
 | 输出文件（out） | ai/model.json | 最佳权重导出路径 |
 | `--resume` | ai/checkpoints/round_003.pt | 从该检查点继续训练，跳过已完成轮次 |
+| `--workers` | 4 | 自对弈并行进程数，多核 CPU 上可显著提速；GPU 训练时自动退化为串行 |
 
 训练流程（每轮）：
 

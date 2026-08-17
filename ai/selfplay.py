@@ -7,10 +7,29 @@ import random
 
 import engine as E
 import numpy as np
-from net import build_input, legal_mask
+from net import build_input, legal_mask, OccupancyNet
 from mcts import MCTS
 
 SIZE = E.SIZE
+
+# ---- 多进程并行自对弈 ----
+# Python 纯计算受 GIL 限制，多线程不会并行；多进程才能真正利用多核。
+# 每个 worker 进程通过 initializer 加载一份网络权重（只加载一次）。
+
+_PROC_NET = None
+
+
+def _init_net(weights):
+    """worker 进程初始化：加载网络权重（CPU）。"""
+    global _PROC_NET
+    _PROC_NET = OccupancyNet()
+    _PROC_NET.load_state_dict(weights)
+    _PROC_NET.eval()
+
+
+def _proc_episode(args):
+    budget, max_steps, seed = args
+    return generate_episode(_PROC_NET, budget, max_steps, seed)
 
 
 def _city_spot(rng, occupied, min_dist):
@@ -97,4 +116,21 @@ def generate_batch(net, budget, max_steps, n_games, base_seed=0):
         samples, winner = generate_episode(net, budget, max_steps, base_seed + g)
         all_samples.extend(samples)
         winners.append(winner)
+    return all_samples, winners
+
+
+def generate_batch_parallel(net, budget, max_steps, n_games, base_seed=0, workers=1):
+    """多进程并行生成 n_games 局样本。workers<=1 时退化为串行 generate_batch。"""
+    if workers <= 1 or n_games <= 1:
+        return generate_batch(net, budget, max_steps, n_games, base_seed)
+    from concurrent.futures import ProcessPoolExecutor
+    # 权重转 CPU 字典传给各 worker（net 对象本身不可跨进程复用）
+    weights = {k: v.detach().cpu() for k, v in net.state_dict().items()}
+    tasks = [(budget, max_steps, base_seed + g) for g in range(n_games)]
+    all_samples = []
+    winners = []
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init_net, initargs=(weights,)) as ex:
+        for samples, winner in ex.map(_proc_episode, tasks):
+            all_samples.extend(samples)
+            winners.append(winner)
     return all_samples, winners

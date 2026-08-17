@@ -17,7 +17,7 @@ import numpy as np
 import engine as E
 from net import OccupancyNet, N_ACTIONS, masked_policy, action_index, build_input, legal_mask
 from mcts import MCTS
-from selfplay import generate_episode, make_start
+from selfplay import generate_episode, generate_batch_parallel, make_start
 
 
 def device_of():
@@ -125,6 +125,8 @@ def main():
     ap.add_argument("out", type=str, nargs="?", default="model.json")
     ap.add_argument("--resume", type=str, default=None,
                     help="从 checkpoint 文件继续训练（从断点轮次的下一个轮次开始）")
+    ap.add_argument("--workers", type=int, default=4,
+                    help="自对弈并行进程数（默认 4；GPU 上自动退化为 1）")
     args = ap.parse_args()
 
     device = device_of()
@@ -148,11 +150,11 @@ def main():
     for r in range(start_round, args.rounds + 1):
         print(f"--- round {r}/{args.rounds} ---")
         # 自对弈（第一轮用随机初始化网络引导，也成立）
-        samples = []
-        for g in range(args.games):
-            smp, winner = generate_episode(best, args.budget, args.max_steps, 100000 + r * 1000 + g)
-            samples.extend(smp)
-        print(f"self-play {args.games} games -> {len(samples)} samples")
+        workers = 1 if device == "cuda" else args.workers
+        samples, winners = generate_batch_parallel(
+            best, args.budget, args.max_steps, args.games,
+            base_seed=100000 + r * 1000, workers=workers)
+        print(f"self-play {args.games} games -> {len(samples)} samples (workers={workers})")
         # 增量训练候选（从最佳权重继续）
         cand = copy.deepcopy(best) if have_best else OccupancyNet().to(device)
         if have_best:
