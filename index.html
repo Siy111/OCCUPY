@@ -2180,6 +2180,18 @@
                 item.addEventListener('click', (e) => this.handleHistoryItemClick(e));
                 return item;
             }
+            appendChatMessage(text, from) {
+                if (!this.historyListEl) return;
+                const label = from === 'second_player' ? 'AI' : '对手';
+                const item = document.createElement('div');
+                item.textContent = `${label}: ${text}`;
+                item.style.padding = '6px 8px';
+                item.style.borderBottom = '1px solid #eee';
+                item.style.color = '#8b5a2b';
+                item.style.fontWeight = 'bold';
+                this.historyListEl.insertBefore(item, this.historyListEl.firstChild);
+                this.historyListEl.scrollTop = 0;
+            }
             handleHistoryItemClick(e) {
                 const index = parseInt(e.target.dataset.index);
                 if (isNaN(index)) return;
@@ -2473,6 +2485,11 @@
                         this.game.onGameStatusChanged(this.isMyTurn ? 'your-turn' : 'opponent-turn');
                         break;
                     case 'sync_state': this.handleSyncState(data); break;
+                    case 'chat':
+                        // 对手（AI）发来的消息：toast 提示 + 常驻显示在历史面板顶部
+                        this.game.ui.notify(data.message || '收到新消息');
+                        this.game.ui.appendChatMessage(data.message || '', data.from);
+                        break;
                     case 'player_left':
                         // 房间保留：对手离开，留在房间等待新玩家/对手重连
                         this.game.ui.notify(data.message || '对手离开了游戏');

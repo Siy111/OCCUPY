@@ -174,10 +174,23 @@ function handleMessage(ws, data) {
         case 'leave_room': leaveRoom(ws); break;
         case 'game_action': broadcastGameAction(ws, data); break;
         case 'sync_response': handleSyncResponse(ws, data); break;
+        case 'chat': handleChat(ws, data); break;
         default:
             const ctx = ws.room ? `房间 ${ws.room.id}` : '连接';
             log('WARN', ctx, `未知消息类型: ${data.type}`);
     }
+}
+
+// 聊天/认输消息：转发给房间内其他玩家（发送者不回显），附发送者角色
+function handleChat(ws, data) {
+    const room = ws.room;
+    if (!room) {
+        ws.send(JSON.stringify({ type: 'error', message: '聊天失败：未加入房间' }));
+        return;
+    }
+    const text = String(data.message || '').slice(0, 200);
+    log('INFO', `房间 ${room.id}`, `消息[${ws.role || '未知'}]: ${text}`);
+    room.broadcast('chat', { message: text, from: ws.role || null }, ws);
 }
 
 // 创建房间（房主固定为先手）
