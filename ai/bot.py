@@ -131,7 +131,7 @@ class PyBot:
             return
         t0 = time.time()
         player = E.PLAYER_MAP[self.bot_side]
-        action, _, _ = self.mcts.search(self.state, player, self.budget)
+        action, _, _, _ = self.mcts.search(self.state, player, self.budget)
         log(f"房间 {self.room_id}: 搜索耗时 {(time.time() - t0) * 1000:.0f}ms")
         if not action:
             self.thinking = False

@@ -6,6 +6,11 @@
 import numpy as np
 from collections import deque
 
+try:
+    from scipy import ndimage as _ndimage
+except ImportError:
+    _ndimage = None
+
 SIZE = 72
 RANGE_PLACE = 2
 RANGE_EAT = 1
@@ -24,6 +29,15 @@ MIX = 3
 RESOURCE = 4
 
 PLAYER_MAP = {"cross": CROSS, "circle": CIRCLE}
+
+# 边界种子环（8 邻域洪泛起点，与 rules.js 参考实现一致，含近角格）：
+# x∈[1,SIZE-2]（y=1 或 SIZE-2）与 y∈[1,SIZE-2]（x=1 或 SIZE-2）
+_RING_MASK = np.zeros((SIZE, SIZE), dtype=bool)
+_RING_MASK[1:SIZE - 1, 1] = True
+_RING_MASK[1:SIZE - 1, SIZE - 2] = True
+_RING_MASK[1, 1:SIZE - 1] = True
+_RING_MASK[SIZE - 2, 1:SIZE - 1] = True
+_CONN8 = np.ones((3, 3), dtype=bool)
 
 
 def create_state():
@@ -180,7 +194,8 @@ def check_attack_condition(state, x, y, size, attacker):
 def build_escape_grid(state, player):
     """可逃生区域（反向 flood fill）。返回 numpy int8 扁平数组：3=可达。
 
-    与 rules.js 同口径，但用 numpy 向量化扩散代替逐格 BFS。
+    与 rules.js 同口径。有 scipy 时用连通域标记一次成型（O(n)）；
+    否则回退到 8 邻域向量化逐轮扩散。种子环为预计算常量，避免逐格 Python 循环。
     """
     g = np.zeros(SIZE * SIZE, dtype=np.int8)
 
@@ -207,26 +222,34 @@ def build_escape_grid(state, player):
     # 可通行掩码（与 can_pass 同口径）：己方棋子 / 己方区域(1) 总可过；敌区(2) 不可过；否则空才可过
     t = grid
     passable = (t == player) | (g2 == 1) | ((g2 != 2) & (t == EMPTY))
+    # 洪泛有效区域 = 可通行 ∩ 非敌区（与原扩散中 grown &= passable + grown[g2==2]=False 等价）
+    allowed = passable & (g2 != 2)
+    # 边界种子：种子环上可通行且非敌区的格（向量化，替代逐格循环）
+    seeds = allowed & _RING_MASK
 
-    # 边界种子（避开角落，与 JS 一致：x∈[1,SIZE-2], y=1 或 SIZE-2；y∈[2,SIZE-3], x=1 或 SIZE-2）
-    reach = np.zeros((SIZE, SIZE), dtype=bool)
-    for y in range(1, SIZE - 1):
-        for x in range(1, SIZE - 1):
-            is_edge = (y == 1 or y == SIZE - 2 or x == 1 or x == SIZE - 2)
-            if not is_edge:
-                continue
-            i = y * SIZE + x
-            if g2[y, x] != 2 and g2[y, x] != 3 and passable[y, x]:
-                reach[y, x] = True
+    if _ndimage is not None:
+        # 连通域一次成型：标记 allowed 的 8 连通分量，含种子的分量即为可逃生区域
+        labels, _ = _ndimage.label(allowed, structure=_CONN8)
+        seed_labels = np.unique(labels[seeds])
+        seed_labels = seed_labels[seed_labels != 0]
+        out = g2.copy()
+        mark = np.isin(labels, seed_labels)
+        # 与回退扩散一致：最外圈（0/SIZE-1）永不标记（围城判定只读城池所在格，外圈无影响）
+        mark[0, :] = False
+        mark[SIZE - 1, :] = False
+        mark[:, 0] = False
+        mark[:, SIZE - 1] = False
+        out[mark] = 3
+        return out.flatten()
 
-    # 8 邻域向量化扩散，直到不再变化
+    # 无 scipy 回退：8 邻域向量化扩散，直到不再变化
+    reach = seeds.copy()
     while True:
         grown = reach.copy()
         for dy, dx in DIRS:
             grown[1:SIZE - 1, 1:SIZE - 1] |= reach[1 - dy:SIZE - 1 - dy, 1 - dx:SIZE - 1 - dx]
-        grown &= passable
+        grown &= allowed
         grown &= ~reach
-        grown[g2 == 2] = False
         if not grown.any():
             break
         reach |= grown
@@ -351,14 +374,15 @@ def apply(state, action):
 
 
 def terminal(state):
+    """终局判定：主城失守。统一返回字符串 "circle"/"cross"/"draw"（与 settlement 同口径）。"""
     c_lost = any(c["owner"] == CIRCLE and c["lost"] for c in state["mainCities"])
     x_lost = any(c["owner"] == CROSS and c["lost"] for c in state["mainCities"])
     if c_lost and x_lost:
         return "draw"
     if c_lost:
-        return CROSS
+        return "circle"
     if x_lost:
-        return CIRCLE
+        return "cross"
     return None
 
 

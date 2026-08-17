@@ -10,7 +10,6 @@
 - backprop：value 每层翻转视角累计
 """
 import math
-from copy import deepcopy
 
 import engine as E
 from net import action_index, evaluate_net
@@ -19,7 +18,7 @@ from net import action_index, evaluate_net
 class Node:
     __slots__ = ("state", "player", "parent", "action_idx", "action",
                  "children", "visits", "value_sum", "prior",
-                 "p_ordered", "expanded", "v_net")
+                 "p_ordered", "expanded", "v_net", "legal")
 
     def __init__(self, state, player, parent=None, action_idx=-1, action=None, prior=0.0):
         self.state = state
@@ -35,6 +34,7 @@ class Node:
         self.p_ordered = None
         self.expanded = 0
         self.v_net = 0.0
+        self.legal = None  # 该节点的合法动作列表（首次评估时缓存，供调用方复用）
 
     def value(self):
         return self.value_sum / self.visits if self.visits else 0.0
@@ -57,16 +57,22 @@ class MCTS:
         self.c_puct = c_puct
 
     def search(self, state, player, budget):
-        """从根状态搜 budget 次迭代，返回 (最佳动作, 根访问分布 π[目标索引], 根价值)。"""
-        root = Node(state=deepcopy(state), player=player)
+        """从根状态搜 budget 次迭代，返回 (最佳动作, 根访问分布 π[目标索引], 根价值, 根合法动作列表)。
+
+        返回的合法动作列表取自根节点首次评估（与传入 state 同局面），
+        调用方可直接传给 net.legal_mask 复用，避免重复枚举。
+        """
+        root = Node(state=E.clone(state), player=player)
         for _ in range(budget):
             leaf = self._select(root)
             v = self._expand_or_eval(leaf)
             self._backprop(leaf, v)
+        legal = root.legal
         # 终选：访问最多的子节点（robust child）
         if not root.children:
-            legal = E.legal_actions(root.state)
-            return (legal[0] if legal else None), None, 0.0
+            if legal is None:
+                legal = E.legal_actions(root.state)
+            return (legal[0] if legal else None), None, 0.0, legal
         best = max(root.children, key=lambda c: c.visits)
         # π：按目标索引聚合访问数
         pi = [0.0] * (E.SIZE * E.SIZE * 2)
@@ -76,7 +82,7 @@ class MCTS:
             total += c.visits
         if total:
             pi = [n / total for n in pi]
-        return best.action, pi, root.value()
+        return best.action, pi, root.value(), legal
 
     def _select(self, root):
         node = root
@@ -104,11 +110,15 @@ class MCTS:
         """返回以 node.player 视角的价值。终局直接给 ±1，否则网络评估并展开。"""
         t = E.terminal(node.state)
         if t is not None:
-            return 1.0 if t == node.player else (-1.0 if t != "draw" else 0.0)
-        legal = E.legal_actions(node.state)
-        if not legal:
-            return 0.0  # 无子可走，视为和棋
+            if t == "draw":
+                return 0.0
+            return 1.0 if E.PLAYER_MAP[t] == node.player else -1.0
+        # 合法动作只在首次评估时枚举一次并缓存（后续访问直接渐进展开，避免重复全量枚举）
         if node.p_ordered is None:
+            legal = E.legal_actions(node.state)
+            if not legal:
+                return 0.0  # 无子可走，视为和棋
+            node.legal = legal
             p, v = evaluate_net(self.net, node.state, node.player, legal)
             # 按目标索引取代表动作，并按先验从高到低排序
             per_target = {}

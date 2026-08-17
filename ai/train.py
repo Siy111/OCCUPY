@@ -8,6 +8,7 @@ import copy
 import json
 import math
 import os
+import random
 import sys
 
 import torch
@@ -17,7 +18,7 @@ import numpy as np
 import engine as E
 from net import OccupancyNet, N_ACTIONS, masked_policy, action_index, build_input, legal_mask
 from mcts import MCTS
-from selfplay import generate_episode, generate_batch_parallel, make_start
+from selfplay import generate_episode, generate_batch_parallel, make_start, _random_warmup
 
 
 def device_of():
@@ -56,7 +57,7 @@ def train_batch(net, opt, samples, epochs, batch_size=64, device="cpu"):
         print(f"  epoch {ep + 1}/{epochs}: loss={total_loss / n:.4f} (v={loss_v.item():.4f} p={loss_p.item():.4f})")
 
 
-def battle(net_a, net_b, n_games, budget, max_steps, device="cpu"):
+def battle(net_a, net_b, n_games, budget, max_steps, device="cpu", warmup=0):
     """net_a vs net_b，交替先手，返回 net_a 胜率（平局计 0.5）。"""
     mcts_a = MCTS(net_a)
     mcts_b = MCTS(net_b)
@@ -66,11 +67,14 @@ def battle(net_a, net_b, n_games, budget, max_steps, device="cpu"):
     for g in range(n_games):
         a_is_cross = (g % 2 == 0)
         state = make_start(10000 + g)
+        if warmup > 0:
+            rng = random.Random(10000 + g + 2000000)
+            _random_warmup(state, warmup, rng)
         winner = None
         for _ in range(max_steps):
             player = E.get_player(state)
             mcts = mcts_a if (player == E.CROSS) == a_is_cross else mcts_b
-            action, _, _ = mcts.search(state, player, budget)
+            action, _, _, _ = mcts.search(state, player, budget)
             if action is None:
                 break
             E.apply(state, action)
@@ -127,6 +131,8 @@ def main():
                     help="从 checkpoint 文件继续训练（从断点轮次的下一个轮次开始）")
     ap.add_argument("--workers", type=int, default=4,
                     help="自对弈并行进程数（默认 4；GPU 上自动退化为 1）")
+    ap.add_argument("--warmup", type=int, default=25,
+                    help="每局自对弈先用随机动作热身走多少步（跳过空转前期，默认 25）")
     args = ap.parse_args()
 
     device = device_of()
@@ -153,12 +159,10 @@ def main():
         workers = 1 if device == "cuda" else args.workers
         samples, winners = generate_batch_parallel(
             best, args.budget, args.max_steps, args.games,
-            base_seed=100000 + r * 1000, workers=workers)
-        print(f"self-play {args.games} games -> {len(samples)} samples (workers={workers})")
-        # 增量训练候选（从最佳权重继续）
+            base_seed=100000 + r * 1000, workers=workers, warmup=args.warmup)
+        print(f"self-play {args.games} games -> {len(samples)} samples (workers={workers}, warmup={args.warmup})")
+        # 增量训练候选（从最佳权重继续；deepcopy 已含权重，无需再覆写）
         cand = copy.deepcopy(best) if have_best else OccupancyNet().to(device)
-        if have_best:
-            cand.load_state_dict(best.state_dict())
         cand_opt = torch.optim.SGD(cand.parameters(), lr=args.lr, momentum=0.9)
         if have_best and opt_state is not None:
             cand_opt.load_state_dict(opt_state)
@@ -168,15 +172,16 @@ def main():
             print("round 1: 无条件接受（无对手）")
             best = cand
             have_best = True
+            opt_state = cand_opt.state_dict()
         else:
-            rate, wa, wb, dr = battle(cand, best, args.battle_games, args.budget, args.max_steps, device)
+            rate, wa, wb, dr = battle(cand, best, args.battle_games, args.budget, args.max_steps, device, warmup=args.warmup)
             print(f"battle candidate {wa}-{wb}-{dr} (win rate {rate:.2%})")
             if rate > 0.55:
                 print("ACCEPTED (new best)")
                 best = cand
+                opt_state = cand_opt.state_dict()  # 仅接受时保存，避免被拒候选的动量污染下一轮
             else:
                 print("REJECTED (keep old best)")
-        opt_state = cand_opt.state_dict()
         if have_best:
             export_json(best, args.out, device)
             save_checkpoint(best, opt_state, r, os.path.join(ckpt_dir, f"round_{r:03d}.pt"))

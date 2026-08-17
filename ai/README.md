@@ -17,6 +17,7 @@
 
 - Python 3.10+
 - 依赖：`torch`、`numpy`、`websocket-client`
+- 可选：`scipy`（加速围城判定中的逃生区域计算；缺失时自动回退到 numpy 实现，功能一致）
 
 安装（CPU 版 torch）：
 

@@ -28,8 +28,8 @@ def _init_net(weights):
 
 
 def _proc_episode(args):
-    budget, max_steps, seed = args
-    return generate_episode(_PROC_NET, budget, max_steps, seed)
+    budget, max_steps, seed, warmup = args
+    return generate_episode(_PROC_NET, budget, max_steps, seed, warmup)
 
 
 def _city_spot(rng, occupied, min_dist):
@@ -64,9 +64,10 @@ def make_start(seed):
     for px, py in _near(main_o, 4):
         open_actions.append({"opt": "layO", "x": px, "y": py})
     resources = []
+    # 资源点集中在棋盘中央区域，逼双方在中线接触、产生对抗分
     for _ in range(10):
-        x = 2 + rng.randrange(SIZE - 4)
-        y = 2 + rng.randrange(SIZE - 4)
+        x = 16 + rng.randrange(SIZE - 32)
+        y = 16 + rng.randrange(SIZE - 32)
         if all(abs(r[0] - x) + abs(r[1] - y) >= 6 for r in resources):
             resources.append((x, y))
     if resources:
@@ -79,19 +80,33 @@ def make_start(seed):
     return s
 
 
-def generate_episode(net, budget, max_steps, seed):
+def _random_warmup(state, steps, rng):
+    """随机合法动作走 steps 步（不记录样本），跳过空转前期、尽快进入接触阶段。"""
+    for _ in range(steps):
+        player = E.get_player(state)
+        actions = E.legal_actions(state)
+        if not actions:
+            break
+        E.apply(state, rng.choice(actions))
+        if E.terminal(state) is not None:
+            break
+
+
+def generate_episode(net, budget, max_steps, seed, warmup=0):
     """一局自对弈 → (samples, winner)。samples 元素 = (planes, mask, pi, z)。"""
     mcts = MCTS(net)
     state = make_start(seed)
+    if warmup > 0:
+        _random_warmup(state, warmup, random.Random(seed + 1000000))
     samples = []
     winner = None
     for _ in range(max_steps):
         player = E.get_player(state)
-        action, pi, _ = mcts.search(state, player, budget)
+        action, pi, _, legal = mcts.search(state, player, budget)
         if action is None:
             break  # 无子可走
         planes = build_input(state, player).squeeze(0).numpy()
-        mask = legal_mask(state, player).numpy()
+        mask = legal_mask(state, player, legal).numpy()  # 复用 search 已算出的合法动作
         samples.append({"planes": planes, "mask": mask, "pi": pi, "who": player})
         E.apply(state, action)
         t = E.terminal(state)
@@ -109,24 +124,24 @@ def generate_episode(net, budget, max_steps, seed):
     return samples, winner
 
 
-def generate_batch(net, budget, max_steps, n_games, base_seed=0):
+def generate_batch(net, budget, max_steps, n_games, base_seed=0, warmup=0):
     all_samples = []
     winners = []
     for g in range(n_games):
-        samples, winner = generate_episode(net, budget, max_steps, base_seed + g)
+        samples, winner = generate_episode(net, budget, max_steps, base_seed + g, warmup)
         all_samples.extend(samples)
         winners.append(winner)
     return all_samples, winners
 
 
-def generate_batch_parallel(net, budget, max_steps, n_games, base_seed=0, workers=1):
+def generate_batch_parallel(net, budget, max_steps, n_games, base_seed=0, workers=1, warmup=0):
     """多进程并行生成 n_games 局样本。workers<=1 时退化为串行 generate_batch。"""
     if workers <= 1 or n_games <= 1:
-        return generate_batch(net, budget, max_steps, n_games, base_seed)
+        return generate_batch(net, budget, max_steps, n_games, base_seed, warmup)
     from concurrent.futures import ProcessPoolExecutor
     # 权重转 CPU 字典传给各 worker（net 对象本身不可跨进程复用）
     weights = {k: v.detach().cpu() for k, v in net.state_dict().items()}
-    tasks = [(budget, max_steps, base_seed + g) for g in range(n_games)]
+    tasks = [(budget, max_steps, base_seed + g, warmup) for g in range(n_games)]
     all_samples = []
     winners = []
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_net, initargs=(weights,)) as ex:
