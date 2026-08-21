@@ -8,8 +8,8 @@
  *        HISTORY_OPT_TO_CODE，本文件需与之一致）
  *
  * 用法:
- *   node util/record-format-convert.js to7 [文件或目录]   # v6 -> v7
- *   node util/record-format-convert.js to6 [文件或目录]   # v7 -> v6
+ *   node util/record-v6-to-v7.js to7 [文件或目录]   # v6 -> v7
+ *   node util/record-v6-to-v7.js to6 [文件或目录]   # v7 -> v6
  *   未指定路径时默认转换 records/ 目录下所有 .json 文件
  */
 'use strict';
@@ -37,7 +37,7 @@ function encodeHistory(history) {
             case 'res': case 'eptRes': case 'mainX': case 'mainO': case 'subX': case 'subO': case 'layX': case 'layO':
                 return [code, a.x, a.y];
             case 'x-place': case 'o-place': case 'x-eat': case 'o-eat':
-                return [code, a.fromX, a.fromY, a.x, a.y];
+                return [code, a.x, a.y, a.fromX, a.fromY];
             case 'choose':
                 return ['c', PLAYER_CODE[a.player] || a.player, a.x, a.y];
             case 'resources':
@@ -65,10 +65,10 @@ function decodeHistory(history) {
             case 'so': return { opt: 'subO', x: b, y: c };
             case 'lx': return { opt: 'layX', x: b, y: c };
             case 'lo': return { opt: 'layO', x: b, y: c };
-            case 'px': return { opt: 'x-place', fromX: b, fromY: c, x: d, y: e };
-            case 'po': return { opt: 'o-place', fromX: b, fromY: c, x: d, y: e };
-            case 'ex': return { opt: 'x-eat', fromX: b, fromY: c, x: d, y: e };
-            case 'eo': return { opt: 'o-eat', fromX: b, fromY: c, x: d, y: e };
+            case 'px': return { opt: 'x-place', fromX: d, fromY: e, x: b, y: c };
+            case 'po': return { opt: 'o-place', fromX: d, fromY: e, x: b, y: c };
+            case 'ex': return { opt: 'x-eat', fromX: d, fromY: e, x: b, y: c };
+            case 'eo': return { opt: 'o-eat', fromX: d, fromY: e, x: b, y: c };
             case 'c': return { opt: 'choose', player: PLAYER_NAME[b] || b, x: c, y: d };
             case 's': return { opt: 'resources', resources: b.map(([x, y]) => ({ x, y })) };
             case 'sl': return { opt: 'select', x: b, y: c };
@@ -117,7 +117,7 @@ function collectJsonFiles(target) {
 }
 
 function printUsage() {
-    console.log('用法: node util/record-format-convert.js <to7|to6> [文件或目录]');
+    console.log('用法: node util/record-v6-to-v7.js <to7|to6> [文件或目录]');
     console.log('  未指定路径时默认转换 records/ 目录下所有 .json 文件');
 }
 
