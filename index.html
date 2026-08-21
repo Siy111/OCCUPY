@@ -2252,14 +2252,67 @@
             }
         }
 
+        // 棋局历史压缩编解码（v7）：导出编码为紧凑数组，导入解码回对象；旧 v6 对象格式自动透传
+        const HISTORY_OPT_TO_CODE = { init:'i', res:'r', eptRes:'e', mainX:'mx', mainO:'mo', subX:'sx', subO:'so', layX:'lx', layO:'lo', 'x-place':'px', 'o-place':'po', 'x-eat':'ex', 'o-eat':'eo', choose:'c', resources:'s', select:'sl' };
+        const HISTORY_PLAYER_CODE = { cross:'x', circle:'o' };
+
         // 文件管理类（导出/导入）
         class FileManager {
             constructor(game) {
                 this.game = game;
             }
 
+            // 内部 history 对象 → 紧凑数组
+            encodeHistory(history) {
+                return history.map(a => {
+                    const code = HISTORY_OPT_TO_CODE[a.opt];
+                    switch (a.opt) {
+                        case 'init': return ['i'];
+                        case 'res': case 'eptRes': case 'mainX': case 'mainO': case 'subX': case 'subO': case 'layX': case 'layO':
+                            return [code, a.x, a.y];
+                        case 'x-place': case 'o-place': case 'x-eat': case 'o-eat':
+                            return [code, a.fromX, a.fromY, a.x, a.y];
+                        case 'choose':
+                            return ['c', HISTORY_PLAYER_CODE[a.player] || a.player, a.x, a.y];
+                        case 'resources':
+                            return ['s', a.resources.map(r => [r.x, r.y])];
+                        case 'select':
+                            return ['sl', a.x, a.y];
+                        default:
+                            return a; // 未知操作保持原样
+                    }
+                });
+            }
+
+            // 紧凑数组 → 内部 history 对象（数组格式解码；对象格式为旧 v6，直接透传）
+            decodeHistory(history) {
+                return history.map(a => {
+                    if (!Array.isArray(a)) return a;
+                    const [code, b, c, d, e] = a;
+                    switch (code) {
+                        case 'i': return { opt: 'init' };
+                        case 'r': return { opt: 'res', x: b, y: c };
+                        case 'e': return { opt: 'eptRes', x: b, y: c };
+                        case 'mx': return { opt: 'mainX', x: b, y: c };
+                        case 'mo': return { opt: 'mainO', x: b, y: c };
+                        case 'sx': return { opt: 'subX', x: b, y: c };
+                        case 'so': return { opt: 'subO', x: b, y: c };
+                        case 'lx': return { opt: 'layX', x: b, y: c };
+                        case 'lo': return { opt: 'layO', x: b, y: c };
+                        case 'px': return { opt: 'x-place', fromX: b, fromY: c, x: d, y: e };
+                        case 'po': return { opt: 'o-place', fromX: b, fromY: c, x: d, y: e };
+                        case 'ex': return { opt: 'x-eat', fromX: b, fromY: c, x: d, y: e };
+                        case 'eo': return { opt: 'o-eat', fromX: b, fromY: c, x: d, y: e };
+                        case 'c': return { opt: 'choose', player: b === 'x' ? 'cross' : b === 'o' ? 'circle' : b, x: c, y: d };
+                        case 's': return { opt: 'resources', resources: b.map(([x, y]) => ({ x, y })) };
+                        case 'sl': return { opt: 'select', x: b, y: c };
+                        default: return a;
+                    }
+                });
+            }
+
             performExport() {
-                const exportData = { meta: { version: "6", timestamp: new Date().toISOString() }, history: this.game.state.history };
+                const exportData = { meta: { version: "7", timestamp: new Date().toISOString() }, history: this.encodeHistory(this.game.state.history) };
                 const jsonStr = JSON.stringify(exportData); const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
                 const defaultBase = `占城棋_棋局${new Date().getTime()}`; let inputBase = prompt('请输入导出文件名：', defaultBase);
                 if (inputBase === null) return; inputBase = inputBase.trim(); if (inputBase === '') inputBase = defaultBase;
@@ -2295,7 +2348,7 @@
             validateImportData(data) { if (!data || !data.history) return false; return true; }
 
             restoreGameState(data) {
-                this.game.state.history = data.history || [];
+                this.game.state.history = this.decodeHistory(data.history || []);
                 this.game.recorder.replayHistory(this.game.state.history.length - 1);
                 this.game.renderer.clearFlashQueue();
                 this.game.ui.renderFullHistory();
