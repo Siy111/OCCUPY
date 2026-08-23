@@ -2318,7 +2318,9 @@
                 if (inputBase === null) return; inputBase = inputBase.trim(); if (inputBase === '') inputBase = defaultBase;
                 inputBase = inputBase.replace(/[\\\/:*?"<>|]/g, '_');
                 const fileName = inputBase.toLowerCase().endsWith('.json') ? inputBase : `${inputBase}.json`;
-                const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = fileName; a.click(); URL.revokeObjectURL(a.href);
+                const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = fileName;
+                a.rel = 'noopener'; a.style.display = 'none'; document.body.appendChild(a); a.click();
+                setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 30000);
                 this.game.ui.notify(`棋局已导出：${fileName}`);
             }
 
