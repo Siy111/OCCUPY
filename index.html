@@ -509,6 +509,8 @@
             }
 
             processCellClick(x, y) {
+                // 旁观者只读：禁止任何棋盘操作
+                if (this.network.isSpectator) return;
                 // 网络对战时，检查是否轮到自己的回合（对手断线期间禁止行动）
                 if (this.network.isNetworkGame && (!this.network.isMyTurn || this.network.opponentGone)) return;
 
@@ -632,10 +634,8 @@
                                  this.state.history.length - 1 : this.state.history.length;
                     }
                     
-                    this.network.sendGameAction({
-                        opt: 'undo',
-                        historyLength: length
-                    });
+                    // 旁观者/未连接时 sendGameAction 返回 false，不再提示等待
+                    if (!this.network.sendGameAction({ opt: 'undo', historyLength: length })) return;
                     this.ui.notify('等待对方同意悔棋...');
                 } else {
                     this.performUndo();
@@ -646,7 +646,8 @@
             // 重新开局
             resetGame() {
                 if (this.network.isNetworkGame) {
-                    this.network.sendGameAction({ opt: 'restart' });
+                    // 旁观者/未连接时 sendGameAction 返回 false，不再提示等待
+                    if (!this.network.sendGameAction({ opt: 'restart' })) return;
                     this.ui.notify('等待对方同意重新开局...');
                 } else {
                     this.init();
@@ -656,7 +657,8 @@
             // 结算
             calculateMove() {
                 if (this.network.isNetworkGame) {
-                    this.network.sendGameAction({ opt: 'calculate' });
+                    // 旁观者/未连接时 sendGameAction 返回 false，不再提示等待
+                    if (!this.network.sendGameAction({ opt: 'calculate' })) return;
                     this.ui.notify('等待对方同意结算...');
                 } else {
                     this.actionProcessor.calculateEndgame();
@@ -2104,11 +2106,11 @@
                 this.connectionStatus.style.color = color;
             }
             setGameStatus(status) {
-                const map = { ready: '准备中', 'waiting-opponent': '等待加入', 'opponent-gone': '对手断线，等待重连...', 'opponent-rejoined': '对手已重连', 'opponent-left': '对手已离开', closed: '房间已关闭', invalid: '房间已失效', 'your-turn': '轮到你', 'opponent-turn': '轮到对方' };
+                const map = { ready: '准备中', 'waiting-opponent': '等待加入', 'opponent-gone': '对手断线，等待重连...', 'opponent-rejoined': '对手已重连', 'opponent-left': '对手已离开', closed: '房间已关闭', invalid: '房间已失效', 'your-turn': '轮到你', 'opponent-turn': '轮到对方', spectating: '观战中' };
                 this.gameStatus.textContent = map[status] || this.gameStatus.textContent;
             }
             setPlayerRole(role) {
-                const map = { none: '未分配', host: '房主', guest: '客人', 'host-waiting': '房主（等待对手）', 'host-rejoin': '房主（重新加入）', 'guest-sync': '客人（等待同步）' };
+                const map = { none: '未分配', host: '房主', guest: '客人', 'host-waiting': '房主（等待对手）', 'host-rejoin': '房主（重新加入）', 'guest-sync': '客人（等待同步）', spectator: '旁观者' };
                 this.playerRole.textContent = map[role] || this.playerRole.textContent;
             }
             setRandomMapEnabled(enabled) { this.randomMapBtn.disabled = !enabled; }
@@ -2372,6 +2374,7 @@
                 this.isHost = false;
                 this.roomId = null;
                 this.opponentGone = false;
+                this.isSpectator = false; // 旁观者：只读看棋，禁言禁操作
                 this._intentionalClose = false;
                 this._reconnectTimer = null;
             }
@@ -2385,6 +2388,7 @@
                 this.playerRole = null;
                 this.roomId = null;
                 this.opponentGone = false;
+                this.isSpectator = false;
                 this.game.onRoomChanged();
                 this.game.onGameStatusChanged('ready');
                 this.game.onPlayerRoleChanged('none');
@@ -2491,7 +2495,10 @@
                 return false;
             }
 
-            sendGameAction(action) { this.sendWs({ type: 'game_action', action: action }); }
+            sendGameAction(action) {
+                if (this.isSpectator) { this.game.ui.notify('旁观者不能下棋'); return false; }
+                return this.sendWs({ type: 'game_action', action: action });
+            }
 
             handleWebSocketMessage(data) {
                 switch (data.type) {
@@ -2505,9 +2512,22 @@
                         this.game.ui.notify(`房间创建成功！房间ID: ${data.roomId}`);
                         break;
                     case 'room_joined':
+                        this.roomId = data.roomId;
+                        if (data.isSpectator) {
+                            // 作为旁观者加入：只读观看，等 sync_state 拉取棋局
+                            this.roomState = 'joiner';
+                            this.isHost = false;
+                            this.isSpectator = true;
+                            this.isNetworkGame = true;
+                            this.playerRole = 'spectator';
+                            this.game.onRoomChanged();
+                            this.game.onGameStatusChanged('spectating');
+                            this.game.onPlayerRoleChanged('spectator');
+                            this.game.ui.notify(data.message || '已作为旁观者加入，等待棋局同步');
+                            break;
+                        }
                         this.roomState = data.isHost ? 'creator' : 'joiner';
                         this.isHost = data.isHost;
-                        this.roomId = data.roomId;
                         this.game.onRoomChanged();
                         this.game.onGameStatusChanged('ready');
                         if (data.role) {
@@ -2532,9 +2552,16 @@
                         this.game.onGameStatusChanged('opponent-rejoined');
                         this.game.ui.notify('对手已重连');
                         break;
+                    case 'spectator_joined':
+                        this.game.ui.notify(data.message || '有旁观者加入');
+                        break;
+                    case 'spectator_left':
+                        this.game.ui.notify(data.message || '有旁观者离开');
+                        break;
                     case 'game_start': this.handleGameStart(data); break;
                     case 'game_action': this.handleGameAction(data); break;
                     case 'sync_request':
+                        if (this.isSpectator) break; // 旁观者不回复同步
                         this.sendWs({ type: 'sync_response', history: this.game.state.history, isMyTurn: !this.isMyTurn });
                         this.game.onGameStatusChanged(this.isMyTurn ? 'your-turn' : 'opponent-turn');
                         break;
@@ -2591,6 +2618,19 @@
             handleGameAction(data) {
                 const action = data.action;
                 if (!action || !action.opt) return;
+                if (this.isSpectator) {
+                    // 旁观者：悔棋/重开答复需同步本地棋盘，否则后续动作叠加在错误历史上；
+                    // 其余请求类（含 undo 征求同意）一律忽略，避免弹窗打扰
+                    if (action.opt === 'undo-reply') {
+                        if (action.reply) { this.game.performUndo(action.historyLength - 1); this.game.recorder.updateStats(); }
+                        return;
+                    }
+                    if (action.opt === 'restart-reply') {
+                        if (action.reply) { this.game.init(); this.game.recorder.updateStats(); }
+                        return;
+                    }
+                    if (['undo', 'restart', 'calculate', 'export', 'calculate-reply', 'export-reply'].includes(action.opt)) return;
+                }
                 switch (action.opt) {
                     case 'undo':
                         this.handleRequestReply('对手请求悔棋，是否同意？', 'undo-reply',
@@ -2624,28 +2664,35 @@
                     default:
                         // 棋盘动作统一走 applyAction；此处只维护网络专属的回合归属
                         this.game.applyAction(action, true);
-                        if (['mainX', 'mainO', 'subX', 'subO', 'layX', 'choose', 'select'].includes(action.opt)) {
-                            this.isMyTurn = false;
-                        } else if (['layO', 'x-place', 'o-place', 'x-eat', 'o-eat'].includes(action.opt)) {
-                            this.isMyTurn = true;
+                        if (!this.isSpectator) {
+                            if (['mainX', 'mainO', 'subX', 'subO', 'layX', 'choose', 'select'].includes(action.opt)) {
+                                this.isMyTurn = false;
+                            } else if (['layO', 'x-place', 'o-place', 'x-eat', 'o-eat'].includes(action.opt)) {
+                                this.isMyTurn = true;
+                            }
                         }
                         this.game.recorder.updateStats();
                         break;
                 }
                 this.game.renderer.flashAction(action, true);
-                this.game.onGameStatusChanged(this.isMyTurn ? 'your-turn' : 'opponent-turn');
+                this.game.onGameStatusChanged(this.isSpectator ? 'spectating' : (this.isMyTurn ? 'your-turn' : 'opponent-turn'));
             }
 
             handleSyncState(data) {
                 if (data.history) { this.game.state.history = data.history; this.game.recorder.replayHistory(this.game.state.history.length - 1); }
-                if (data.isMyTurn !== undefined) this.isMyTurn = data.isMyTurn;
+                if (data.isMyTurn !== undefined && !this.isSpectator) this.isMyTurn = data.isMyTurn;
                 this.isNetworkGame = true;
                 this.game.ui.renderFullHistory();
                 this.game.renderer.initBoard(); this.game.renderer.drawBoard();
                 this.game.recorder.updateStats();
                 // 同步完成，恢复正常状态显示（清除"等待同步"）
-                this.game.onPlayerRoleChanged(this.isHost ? 'host' : 'guest');
-                this.game.onGameStatusChanged(this.isMyTurn ? 'your-turn' : 'opponent-turn');
+                if (this.isSpectator) {
+                    this.game.onPlayerRoleChanged('spectator');
+                    this.game.onGameStatusChanged('spectating');
+                } else {
+                    this.game.onPlayerRoleChanged(this.isHost ? 'host' : 'guest');
+                    this.game.onGameStatusChanged(this.isMyTurn ? 'your-turn' : 'opponent-turn');
+                }
             }
         }
 

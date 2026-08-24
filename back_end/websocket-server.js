@@ -21,11 +21,13 @@ function log(level, context, message) {
 // ==================== 房间模型 ====================
 // 每个房间管理两名玩家（first_player 房主/先手，second_player 客人/后手）。
 // 玩家槽位值：WebSocket（在线）| null（离线，宽限期内等待重连）。
+// 旁观者：spectators 集合（不限人数），可同步棋局、观看走子，禁言且不能操作棋局。
 // 连接对象上挂载 room/role 归属，断线定位从"遍历全表"降为 O(1)。
 class Room {
     constructor(hostWs) {
         this.id = generateRoomId();
         this.players = new Map(); // role → ws | null
+        this.spectators = new Set(); // 旁观者：ws 集合
         this.isGameStarted = false;
         this.graceTimer = null;
         this.addPlayer('first_player', hostWs);
@@ -37,6 +39,19 @@ class Room {
         this.players.set(role, ws);
         ws.room = this;
         ws.role = role;
+    }
+
+    // ---- 旁观者 ----
+
+    addSpectator(ws) {
+        this.spectators.add(ws);
+        ws.room = this;
+        ws.role = 'spectator';
+    }
+
+    removeSpectator(ws) {
+        this.spectators.delete(ws);
+        if (ws.room === this) { ws.room = null; ws.role = null; }
     }
 
     onlineCount() {
@@ -63,7 +78,19 @@ class Room {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...payload }));
     }
 
+    // 广播给所有玩家与旁观者（exceptWs 除外）；sync_request 等仅面向玩家的请用 broadcastPlayers
     broadcast(type, payload = {}, exceptWs = null) {
+        const message = JSON.stringify({ type, ...payload });
+        for (const ws of this.players.values()) {
+            if (ws && ws !== exceptWs && ws.readyState === WebSocket.OPEN) ws.send(message);
+        }
+        for (const ws of this.spectators) {
+            if (ws !== exceptWs && ws.readyState === WebSocket.OPEN) ws.send(message);
+        }
+    }
+
+    // 仅广播给玩家（不发给旁观者）
+    broadcastPlayers(type, payload = {}, exceptWs = null) {
         const message = JSON.stringify({ type, ...payload });
         for (const ws of this.players.values()) {
             if (ws && ws !== exceptWs && ws.readyState === WebSocket.OPEN) ws.send(message);
@@ -86,7 +113,7 @@ class Room {
         this.addPlayer(role, ws);
         if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
         this.broadcast('player_rejoined', { message: '对手已重连' }, ws);
-        this.broadcast('sync_request', { message: '对手重连，请发送游戏状态' }, ws);
+        this.broadcastPlayers('sync_request', { message: '对手重连，请发送游戏状态' }, ws);
     }
 
     // 启动宽限期：超时后按房主/客人/双方在线情况清理
@@ -110,6 +137,8 @@ class Room {
     close(message = null, exceptWs = null) {
         if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
         if (message) this.broadcast('room_closed', { message }, exceptWs);
+        for (const ws of this.spectators) { if (ws.room === this) ws.room = null; }
+        this.spectators.clear();
         rooms.delete(this.id);
         log('INFO', `房间 ${this.id}`, `已删除${message ? `：${message}` : ''}`);
     }
@@ -145,7 +174,14 @@ wss.on('connection', (ws) => {
         const ctx = ws.room ? `房间 ${ws.room.id}` : '连接';
         log('INFO', ctx, `连接关闭（角色 ${ws.role || '未入房'}）`);
         // 通过连接上挂载的房间归属 O(1) 定位，无需遍历全部房间
-        if (ws.room) ws.room.handleDisconnect(ws.role, ws);
+        if (ws.room) {
+            if (ws.role === 'spectator') {
+                ws.room.removeSpectator(ws); // 旁观者断线直接移除，不进宽限期
+                log('INFO', ctx, '旁观者离开');
+            } else {
+                ws.room.handleDisconnect(ws.role, ws);
+            }
+        }
     });
 
     ws.on('error', (error) => {
@@ -181,11 +217,16 @@ function handleMessage(ws, data) {
     }
 }
 
-// 聊天/认输消息：转发给房间内其他玩家（发送者不回显），附发送者角色
+// 聊天/认输消息：转发给房间内其他玩家与旁观者（发送者不回显），附发送者角色
 function handleChat(ws, data) {
     const room = ws.room;
     if (!room) {
         ws.send(JSON.stringify({ type: 'error', message: '聊天失败：未加入房间' }));
+        return;
+    }
+    if (ws.role === 'spectator') {
+        ws.send(JSON.stringify({ type: 'error', message: '旁观者不能发言' }));
+        log('WARN', `房间 ${room.id}`, '旁观者尝试发言，已拒绝');
         return;
     }
     const text = String(data.message || '').slice(0, 200);
@@ -195,6 +236,11 @@ function handleChat(ws, data) {
 
 // 创建房间（房主固定为先手）
 function createRoom(ws) {
+    if (ws.room && ws.role === 'spectator') {
+        ws.send(JSON.stringify({ type: 'error', message: '旁观者不能创建房间' }));
+        log('WARN', '连接', '旁观者尝试创建房间，已拒绝');
+        return;
+    }
     const room = new Room(ws);
     rooms.set(room.id, room);
     room.send(ws, 'room_created', { roomId: room.id, isHost: true, message: '房间创建成功' });
@@ -232,14 +278,17 @@ function joinRoom(ws, data) {
         room.addPlayer('second_player', ws);
         room.send(ws, 'room_joined', { roomId: room.id, isHost: false, message: '加入房间成功' });
         room.broadcast('player_joined', { message: '对手已加入' }, ws);
-        room.broadcast('sync_request', { message: '请发送游戏状态' }, ws);
+        room.broadcastPlayers('sync_request', { message: '请发送游戏状态' }, ws);
         log('INFO', `房间 ${room.id}`, '客人加入，请求同步');
         return;
     }
 
-    // 4) 两人都在线
-    ws.send(JSON.stringify({ type: 'error', message: '房间已满' }));
-    log('WARN', `房间 ${room.id}`, '拒绝加入：房间已满');
+    // 4) 两名玩家都在线：作为旁观者加入（可观看棋局，禁言禁操作）
+    room.addSpectator(ws);
+    room.send(ws, 'room_joined', { roomId: room.id, isHost: false, role: 'spectator', isSpectator: true, message: '已作为旁观者加入房间' });
+    room.broadcast('spectator_joined', { message: '有旁观者加入' }, ws);
+    room.broadcastPlayers('sync_request', { message: '请发送游戏状态' }, ws);
+    log('INFO', `房间 ${room.id}`, '旁观者加入，请求同步');
 }
 
 // 关闭房间（仅房主可操作）
@@ -252,6 +301,12 @@ function closeRoom(ws) {
 function leaveRoom(ws) {
     const room = ws.room;
     if (!room) return;
+    if (ws.role === 'spectator') {
+        room.removeSpectator(ws); // 旁观者退出：直接移除
+        room.broadcast('spectator_left', { message: '有旁观者离开' });
+        log('INFO', `房间 ${room.id}`, '旁观者退出');
+        return;
+    }
     room.players.delete(ws.role); // 直接释放槽位（非断线，不进入宽限期）
     ws.room = null;
     if (room.onlineCount() === 0) {
@@ -262,17 +317,23 @@ function leaveRoom(ws) {
     }
 }
 
-// 广播游戏操作
+// 广播游戏操作（记录具体动作日志；旁观者禁止操作）
 function broadcastGameAction(ws, data) {
     const room = ws.room;
     if (!room) return;
+    if (ws.role === 'spectator') {
+        log('WARN', `房间 ${room.id}`, '旁观者尝试发送游戏操作，已忽略');
+        return;
+    }
+    log('INFO', `房间 ${room.id}`, `游戏操作: ${JSON.stringify(data.action)}`);
     room.broadcast('game_action', { action: data.action }, ws);
 }
 
-// 处理同步响应：向对方转发全量历史与回合状态；若游戏未开始则同步后开局
+// 处理同步响应：向对方与旁观者转发全量历史与回合状态；若游戏未开始则同步后开局
 function handleSyncResponse(ws, data) {
     const room = ws.room;
     if (!room) return;
+    if (ws.role === 'spectator') return; // 旁观者不参与同步响应
     room.broadcast('sync_state', { history: data.history, isMyTurn: data.isMyTurn }, ws);
     if (!room.isGameStarted) room.tryStart();
 }
@@ -288,7 +349,7 @@ function generateRoomId() {
 }
 
 // ==================== 启动 ====================
-const PORT = 8080;
+const PORT = Number(process.env.PORT) || 8080;
 server.listen(PORT, '0.0.0.0', () => {
     log('INFO', null, `WebSocket服务器启动在端口 ${PORT}（本地: ws://localhost:${PORT}）`);
 });
